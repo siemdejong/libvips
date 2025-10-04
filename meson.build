@@ -416,6 +416,8 @@ if openslide_dep.found()
     cfg_var.set('HAVE_OPENSLIDE_CACHE_CREATE', cc.has_function('openslide_cache_create', prefix: '#include <openslide.h>', dependencies: openslide_dep))
 endif
 
+tensorstore_dep = dependency('tensorstore', fallback: ['tensorstore', 'tensorstore_dep'])
+
 matio_dep = dependency('matio', required: get_option('matio'))
 if matio_dep.found()
     external_deps += matio_dep
