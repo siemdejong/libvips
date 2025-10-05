@@ -1,8 +1,8 @@
-# OME-NGFF Support in libvips zarrsave
+# OME-Zarr Support in libvips zarrsave
 
 ## Overview
 
-libvips now supports writing OME-NGFF (Open Microscopy Environment - Next Generation File Format) v0.5 compatible Zarr arrays. This allows microscopy images to be stored in a format that is widely supported by the bioimaging community.
+libvips now supports writing OME-Zarr (Open Microscopy Environment - Next Generation File Format) v0.5 compatible Zarr arrays. This allows microscopy images to be stored in a format that is widely supported by the bioimaging community.
 
 ## Quick Start
 
@@ -10,13 +10,13 @@ libvips now supports writing OME-NGFF (Open Microscopy Environment - Next Genera
 # Regular Zarr v3
 vips copy input.tif output.zarr
 
-# OME-NGFF Zarr v3
-vips copy input.tif output.zarr[ome_ngff]
+# OME-Zarr Zarr v3
+vips copy input.tif output.zarr[ome_zarr]
 ```
 
-## What is OME-NGFF?
+## What is OME-Zarr?
 
-OME-NGFF is a specification for storing multi-dimensional bioimaging data using the Zarr format. It adds standardized metadata that describes:
+OME-Zarr is a specification for storing multi-dimensional bioimaging data using the Zarr format. It adds standardized metadata that describes:
 
 - **Axes**: Dimensions and their types (spatial, channel, time)
 - **Physical units**: Real-world measurements (micrometers, seconds, etc.)
@@ -32,7 +32,7 @@ output.zarr/
 └── c/0/0/0           # Chunk data at root
 ```
 
-### OME-NGFF Zarr
+### OME-Zarr Zarr
 ```
 output.zarr/
 ├── zarr.json          # Group metadata with OME namespace
@@ -87,7 +87,7 @@ output.zarr/
 
 1. **Automatic axis detection**: Channel axis only added for multi-band images
 2. **Zarr v3 compliant**: Uses latest Zarr specification
-3. **OME-NGFF v0.5**: Compatible with latest spec version
+3. **OME-Zarr v0.5**: Compatible with latest spec version
 4. **Physical units**: Spatial axes use micrometers by default
 5. **Single resolution**: Currently supports one resolution level
 
@@ -95,20 +95,20 @@ output.zarr/
 
 ### Microscopy Data
 ```bash
-# Convert microscopy TIFF to OME-NGFF
-vips copy microscopy.tif microscopy.zarr[ome_ngff]
+# Convert microscopy TIFF to OME-Zarr
+vips copy microscopy.tif microscopy.zarr[ome_zarr]
 ```
 
 ### High-Content Screening
 ```bash
 # Convert well plate images
 for well in A01 A02 A03; do
-    vips copy plate_${well}.tif plate.zarr/${well}[ome_ngff]
+    vips copy plate_${well}.tif plate.zarr/${well}[ome_zarr]
 done
 ```
 
 ### Remote Data Access
-OME-NGFF format enables:
+OME-Zarr format enables:
 - Cloud-native storage (S3, GCS)
 - Chunk-based streaming
 - Partial image loading
@@ -117,20 +117,20 @@ OME-NGFF format enables:
 ## Compatibility
 
 ### Readers
-OME-NGFF output can be read by:
+OME-Zarr output can be read by:
 - [napari](https://napari.org/) - Multi-dimensional image viewer
 - [neuroglancer](https://github.com/google/neuroglancer) - WebGL visualization
 - [OMERO](https://www.openmicroscopy.org/omero/) - Image data management
 - [QuPath](https://qupath.github.io/) - Pathology image analysis
 - [zarr-python](https://zarr.readthedocs.io/) - Python Zarr library
-- [ome-zarr-py](https://github.com/ome/ome-zarr-py) - OME-NGFF Python tools
+- [ome-zarr-py](https://github.com/ome/ome-zarr-py) - OME-Zarr Python tools
 
 ### Validation
 ```bash
 # Install ome-zarr-py
 pip install ome-zarr
 
-# Validate OME-NGFF output
+# Validate OME-Zarr output
 ome_zarr info output.zarr
 
 # View in napari
@@ -140,13 +140,13 @@ napari output.zarr
 ## Implementation Details
 
 ### Rust Module
-- `src/ome_ngff.rs`: Metadata generation
-- Implements OME-NGFF v0.5 specification
+- `src/ome_zarr.rs`: Metadata generation
+- Implements OME-Zarr v0.5 specification
 - JSON generation using serde_json
 - Automatic axis ordering (time > channel > space)
 
 ### C Interface
-- `ome_ngff` boolean option in VipsForeignSaveZarr
+- `ome_zarr` boolean option in VipsForeignSaveZarr
 - Passed through FFI to Rust implementation
 - No performance overhead when disabled
 
@@ -169,7 +169,7 @@ napari output.zarr
 
 ## References
 
-- [OME-NGFF Specification](https://ngff.openmicroscopy.org/0.5/)
+- [OME-Zarr Specification](https://ngff.openmicroscopy.org/0.5/)
 - [Zarr v3 Specification](https://zarr-specs.readthedocs.io/en/latest/v3/core/v3.0.html)
 - [OME-Zarr GitHub](https://github.com/ome/ome-zarr-py)
 - [NGFF Tools](https://ngff.openmicroscopy.org/tools/)

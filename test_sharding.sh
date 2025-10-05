@@ -27,16 +27,16 @@ echo "Created test_zarr_sharded.zarr with sharding"
 ls -lh test_zarr_sharded.zarr/
 find test_zarr_sharded.zarr -type f | head -10
 
-# Test 3: OME-NGFF without sharding
-echo -e "\n=== Test 3: OME-NGFF without sharding ==="
-./build/tools/vips copy test_rgb.v "test_zarr_ome.zarr[ome_ngff=1]"
+# Test 3: OME-Zarr without sharding
+echo -e "\n=== Test 3: OME-Zarr without sharding ==="
+./build/tools/vips copy test_rgb.v "test_zarr_ome.zarr[ome_zarr=1]"
 echo "Created test_zarr_ome.zarr"
 ls -lh test_zarr_ome.zarr/
 cat test_zarr_ome.zarr/ome.zarr
 
-# Test 4: OME-NGFF with sharding (256x256x3 shards)
-echo -e "\n=== Test 4: OME-NGFF with sharding ==="
-./build/tools/vips copy test_rgb.v "test_zarr_sharded_ome.zarr[ome_ngff=1,shard_height=256,shard_width=256,shard_bands=3]"
+# Test 4: OME-Zarr with sharding (256x256x3 shards)
+echo -e "\n=== Test 4: OME-Zarr with sharding ==="
+./build/tools/vips copy test_rgb.v "test_zarr_sharded_ome.zarr[ome_zarr=1,shard_height=256,shard_width=256,shard_bands=3]"
 echo "Created test_zarr_sharded_ome.zarr with sharding"
 ls -lh test_zarr_sharded_ome.zarr/
 cat test_zarr_sharded_ome.zarr/ome.zarr

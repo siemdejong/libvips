@@ -32,19 +32,19 @@ echo "  File structure (shards created):"
 find test_sharded.zarr -type f -name "c*" -o -name "[0-9]*" | grep -v zarr.json | head -5
 echo
 
-echo "=== Test 3: OME-NGFF without sharding ==="
-./build/tools/vips copy test_512_rgb.v "test_ome.zarr[ome_ngff=1]"
+echo "=== Test 3: OME-Zarr without sharding ==="
+./build/tools/vips copy test_512_rgb.v "test_ome.zarr[ome_zarr=1]"
 echo "✓ Created test_ome.zarr"
-echo "  OME-NGFF metadata (in zarr.json attributes):"
+echo "  OME-Zarr metadata (in zarr.json attributes):"
 cat test_ome.zarr/zarr.json | python3 -c "import sys, json; j=json.load(sys.stdin); ome=j.get('attributes', {}).get('ome', {}); ms=ome.get('multiscales', [{}])[0]; print('  - OME Version:', ome.get('version')); print('  - Multiscales Version:', ms.get('version')); print('  - Axes:', [a['name'] for a in ms.get('axes', [])])"
 echo
 
-echo "=== Test 4: OME-NGFF with sharding (256x256x3) ==="
-./build/tools/vips copy test_512_rgb.v "test_ome_sharded.zarr[ome_ngff=1,shard_height=256,shard_width=256,shard_bands=3]"
+echo "=== Test 4: OME-Zarr with sharding (256x256x3) ==="
+./build/tools/vips copy test_512_rgb.v "test_ome_sharded.zarr[ome_zarr=1,shard_height=256,shard_width=256,shard_bands=3]"
 echo "✓ Created test_ome_sharded.zarr"
 echo "  Array metadata (0/zarr.json):"
 cat test_ome_sharded.zarr/0/zarr.json | python3 -c "import sys, json; j=json.load(sys.stdin); c=j['codecs'][0]; print('  - Codec:', c['name']); print('  - Inner chunk shape:', c['configuration']['chunk_shape'])"
-echo "  OME-NGFF metadata (in zarr.json attributes):"
+echo "  OME-Zarr metadata (in zarr.json attributes):"
 cat test_ome_sharded.zarr/zarr.json | python3 -c "import sys, json; j=json.load(sys.stdin); ome=j.get('attributes', {}).get('ome', {}); print('  - OME Version:', ome.get('version'))"
 echo
 
@@ -69,4 +69,4 @@ done
 echo
 
 echo "=== All Tests Passed! ==="
-echo "Sharding implementation is working correctly in both regular and OME-NGFF modes."
+echo "Sharding implementation is working correctly in both regular and OME-Zarr modes."

@@ -44,11 +44,11 @@ libvips now supports saving images in Zarr v3 format through a new `zarrsave` op
 - Gzip compression applied to chunks
 - Optimization: chunks containing only fill values are not written
 
-### OME-NGFF Support
-- Optional OME-NGFF (Open Microscopy Environment - Next Generation File Format) v0.5 compatible output
+### OME-Zarr Support
+- Optional OME-Zarr (Open Microscopy Environment - Next Generation File Format) v0.5 compatible output
 - Proper `multiscales` metadata with `axes`, `datasets`, and `coordinateTransformations`
 - Automatic axis detection (channel, spatial y/x)
-- Array stored in subdirectory (`0/`) per OME-NGFF specification
+- Array stored in subdirectory (`0/`) per OME-Zarr specification
 - Physical units (micrometers) for spatial axes
 - Compatible with OME-Zarr readers and visualization tools
 
@@ -65,16 +65,16 @@ vips invert test.v test_white.v
 vips copy test_white.v test.zarr
 ```
 
-### OME-NGFF Example
+### OME-Zarr Example
 ```bash
-# Save with OME-NGFF metadata
-vips copy input.tif output.zarr[ome_ngff]
+# Save with OME-Zarr metadata
+vips copy input.tif output.zarr[ome_zarr]
 
 # Or explicitly set the option
-vips copy input.tif output.zarr[ome_ngff=true]
+vips copy input.tif output.zarr[ome_zarr=true]
 
 # Regular Zarr without OME metadata
-vips copy input.tif output.zarr[ome_ngff=false]
+vips copy input.tif output.zarr[ome_zarr=false]
 ```
 
 ### Verify Output
@@ -85,14 +85,14 @@ cat output.zarr/zarr.json
 # For regular Zarr
 find output.zarr/c -type f
 
-# For OME-NGFF Zarr
+# For OME-Zarr Zarr
 find output.zarr/0/c -type f
 
 # Verify chunk compression
 file output.zarr/c/0/0/0  # regular
-file output.zarr/0/c/0/0/0  # OME-NGFF
+file output.zarr/0/c/0/0/0  # OME-Zarr
 
-# View OME-NGFF metadata
+# View OME-Zarr metadata
 cat output.zarr/zarr.json | grep -A 30 '"ome"'
 ```
 
@@ -104,8 +104,8 @@ Images are stored with shape `[height, width, bands]` to match VIPS' memory layo
 - RGB: `[H, W, 3]`
 - RGBA: `[H, W, 4]`
 
-### OME-NGFF Metadata Structure
-When `ome_ngff=true`, the output conforms to OME-NGFF v0.5:
+### OME-Zarr Metadata Structure
+When `ome_zarr=true`, the output conforms to OME-Zarr v0.5:
 
 ```json
 {
@@ -203,7 +203,7 @@ The Rust library is built as part of the Meson build:
 3. **No chunk cache**: Future optimization opportunity
 4. **Gzip only**: No alternative codecs (e.g., blosc, zstd)
 5. **No metadata**: Custom VIPS metadata not preserved
-6. **Single resolution**: OME-NGFF output only includes one resolution level
+6. **Single resolution**: OME-Zarr output only includes one resolution level
 
 ## Future Enhancements
 
@@ -214,18 +214,18 @@ The Rust library is built as part of the Meson build:
 - [ ] Read support (zarrload)
 - [ ] Support for Zarr v2 format
 - [ ] Parallel chunk writing
-- [ ] Multi-resolution pyramids for OME-NGFF
-- [ ] Labels support for OME-NGFF segmentation data
+- [ ] Multi-resolution pyramids for OME-Zarr
+- [ ] Labels support for OME-Zarr segmentation data
 
 ## Files Modified/Added
 
 ### New Files
 - `rust/zarrs_wrapper/Cargo.toml` - Rust project configuration (with serde_json dependency)
-- `rust/zarrs_wrapper/src/lib.rs` - FFI implementation with OME-NGFF support
-- `rust/zarrs_wrapper/src/ome_ngff.rs` - OME-NGFF metadata generation
+- `rust/zarrs_wrapper/src/lib.rs` - FFI implementation with OME-Zarr support
+- `rust/zarrs_wrapper/src/ome_zarr.rs` - OME-Zarr metadata generation
 - `rust/zarrs_wrapper.h` - C header for FFI functions
 - `rust/meson.build` - Rust build integration
-- `libvips/foreign/zarrsave.c` - VipsForeignSave implementation with ome_ngff option
+- `libvips/foreign/zarrsave.c` - VipsForeignSave implementation with ome_zarr option
 - `test_zarrsave.sh` - Test script
 
 ### Modified Files
@@ -236,7 +236,7 @@ The Rust library is built as part of the Meson build:
 ## References
 
 - Zarr v3 Specification: https://zarr-specs.readthedocs.io/en/latest/v3/core/v3.0.html
-- OME-NGFF Specification v0.5: https://ngff.openmicroscopy.org/0.5/
+- OME-Zarr Specification v0.5: https://ngff.openmicroscopy.org/0.5/
 - zarrs Rust library: https://github.com/zarrs/zarrs
 - libvips: https://www.libvips.org/
 

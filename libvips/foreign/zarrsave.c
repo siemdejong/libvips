@@ -50,7 +50,7 @@ typedef struct _VipsForeignSaveZarr {
 	VipsForeignSave parent_object;
 
 	char *filename;
-	gboolean ome_ngff;
+	gboolean ome_zarr;
 	int chunk_height;
 	int chunk_width;
 	int chunk_bands;
@@ -142,7 +142,7 @@ vips_foreign_save_zarr_build(VipsObject *object)
 			data_type,
 			data,
 			data_len,
-			zarr->ome_ngff,
+			zarr->ome_zarr,
 			zarr->chunk_height,
 			zarr->chunk_width,
 			zarr->chunk_bands,
@@ -187,11 +187,11 @@ vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 		G_STRUCT_OFFSET(VipsForeignSaveZarr, filename),
 		NULL);
 
-	VIPS_ARG_BOOL(class, "ome_ngff", 20,
-		_("OME-NGFF"),
-		_("Write OME-NGFF (Open Microscopy Environment) compatible metadata"),
+	VIPS_ARG_BOOL(class, "ome_zarr", 20,
+		_("OME-Zarr"),
+		_("Write OME-Zarr (Open Microscopy Environment) compatible metadata"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
-		G_STRUCT_OFFSET(VipsForeignSaveZarr, ome_ngff),
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, ome_zarr),
 		FALSE);
 
 	VIPS_ARG_INT(class, "chunk_height", 21,
@@ -250,7 +250,7 @@ vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
  *
  * Optional arguments:
  *
- * * @ome_ngff: %gboolean, write OME-NGFF compatible metadata
+ * * @ome_zarr: %gboolean, write OME-Zarr compatible metadata
  * * @chunk_height: %gint, chunk height (0 for full image height)
  * * @chunk_width: %gint, chunk width (0 for full image width)
  * * @chunk_bands: %gint, chunk bands (0 for all bands)
@@ -288,7 +288,7 @@ vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
  *
  * Supported data types are: uint8, uint16, uint32, float32, float64.
  *
- * If @ome_ngff is TRUE, the output will conform to the OME-NGFF
+ * If @ome_zarr is TRUE, the output will conform to the OME-Zarr
  * (Open Microscopy Environment - Next Generation File Format) 
  * specification v0.5, with proper multiscales metadata, axes 
  * definitions, and coordinate transformations. The array will be

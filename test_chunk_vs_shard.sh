@@ -61,15 +61,15 @@ chunk_files=$(find test_large_chunks.zarr/c -type f 2>/dev/null | wc -l || echo 
 echo "  Actual chunk files: $chunk_files"
 echo
 
-echo "=== Test 5: OME-NGFF with chunking ==="
-./build/tools/vips copy test_512_rgb.v "test_ome_chunks.zarr[ome_ngff=1,chunk_height=128,chunk_width=128,chunk_bands=3]"
+echo "=== Test 5: OME-Zarr with chunking ==="
+./build/tools/vips copy test_512_rgb.v "test_ome_chunks.zarr[ome_zarr=1,chunk_height=128,chunk_width=128,chunk_bands=3]"
 echo "✓ Created test_ome_chunks.zarr"
 chunk_files=$(find test_ome_chunks.zarr/0/c -type f 2>/dev/null | wc -l || echo "0")
 echo "  Chunk files in /0/: $chunk_files"
 echo
 
-echo "=== Test 6: OME-NGFF with chunking + sharding ==="
-./build/tools/vips copy test_512_rgb.v "test_ome_chunks_shards.zarr[ome_ngff=1,chunk_height=64,chunk_width=64,chunk_bands=3,shard_height=256,shard_width=256,shard_bands=3]"
+echo "=== Test 6: OME-Zarr with chunking + sharding ==="
+./build/tools/vips copy test_512_rgb.v "test_ome_chunks_shards.zarr[ome_zarr=1,chunk_height=64,chunk_width=64,chunk_bands=3,shard_height=256,shard_width=256,shard_bands=3]"
 echo "✓ Created test_ome_chunks_shards.zarr"
 echo "  Outer chunk (shard) shape:"
 cat test_ome_chunks_shards.zarr/0/zarr.json | python3 -c "import sys, json; j=json.load(sys.stdin); print('  -', j['chunk_grid']['configuration']['chunk_shape'])"

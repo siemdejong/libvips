@@ -7,7 +7,7 @@ cargo = find_program('cargo', required: true)
 # Collect Rust source files to track dependencies
 rust_sources = files(
     'zarrs_wrapper/src/lib.rs',
-    'zarrs_wrapper/src/ome_ngff.rs',
+    'zarrs_wrapper/src/ome_zarr.rs',
     'zarrs_wrapper/Cargo.toml',
     'zarrs_wrapper/Cargo.lock',
 )

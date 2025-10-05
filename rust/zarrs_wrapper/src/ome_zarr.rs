@@ -1,6 +1,6 @@
-/// OME-NGFF metadata generation
+/// OME-Zarr metadata generation
 /// 
-/// This module implements the OME-NGFF (Open Microscopy Environment - Next Generation File Format)
+/// This module implements the OME-Zarr (Open Microscopy Environment - Next Generation File Format)
 /// v0.5 specification for Zarr metadata.
 /// 
 /// Spec: https://ngff.openmicroscopy.org/0.5/
@@ -8,13 +8,13 @@
 use serde_json::{json, Value};
 use std::error::Error;
 
-/// Generate OME-NGFF compliant axes metadata
+/// Generate OME-Zarr compliant axes metadata
 /// 
 /// For a simple 2D or 3D image with channels, we generate:
 /// - "y", "x" for spatial axes (always present)
 /// - "c" for channel axis (if bands > 1)
 ///
-/// According to OME-NGFF spec:
+/// According to OME-Zarr spec:
 /// - Spatial axes should use type "space"
 /// - Channel axis should use type "channel"
 /// - Axes must be ordered: time (optional), channel (optional), space (z, y, x)
@@ -67,11 +67,11 @@ fn generate_coordinate_transformations(bands: u64) -> Vec<Value> {
     })]
 }
 
-/// Generate the complete OME-NGFF metadata structure
+/// Generate the complete OME-Zarr metadata structure
 ///
 /// This creates the group-level metadata that must be stored in zarr.json
 /// at the root of the Zarr group.
-pub fn generate_ome_ngff_metadata(
+pub fn generate_ome_zarr_metadata(
     width: u64,
     height: u64,
     bands: u64,
@@ -98,7 +98,7 @@ pub fn generate_ome_ngff_metadata(
         _ => return Err("Unsupported data type".into()),
     };
     
-    // Create the multiscales metadata according to OME-NGFF 0.5 spec
+    // Create the multiscales metadata according to OME-Zarr 0.5 spec
     let metadata = json!({
         "multiscales": [{
             "version": "0.5",

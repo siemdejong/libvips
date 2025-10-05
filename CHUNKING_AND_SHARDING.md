@@ -56,18 +56,18 @@ vips copy input.tif output.zarr[chunk_height=64,chunk_width=64,chunk_bands=3,sha
 - Result: Fewer shard files, each containing multiple chunks
 - Use case: Cloud storage optimization, reduce HTTP requests
 
-### 4. OME-NGFF with Chunking
+### 4. OME-Zarr with Chunking
 ```bash
-vips copy input.tif output.zarr[ome_ngff=1,chunk_height=128,chunk_width=128,chunk_bands=3]
+vips copy input.tif output.zarr[ome_zarr=1,chunk_height=128,chunk_width=128,chunk_bands=3]
 ```
-- Result: OME-NGFF compatible with chunked storage
+- Result: OME-Zarr compatible with chunked storage
 - Use case: Microscopy data with metadata
 
-### 5. OME-NGFF with Chunking + Sharding
+### 5. OME-Zarr with Chunking + Sharding
 ```bash
-vips copy input.tif output.zarr[ome_ngff=1,chunk_height=64,chunk_width=64,chunk_bands=3,shard_height=256,shard_width=256,shard_bands=3]
+vips copy input.tif output.zarr[ome_zarr=1,chunk_height=64,chunk_width=64,chunk_bands=3,shard_height=256,shard_width=256,shard_bands=3]
 ```
-- Result: OME-NGFF with optimized cloud storage
+- Result: OME-Zarr with optimized cloud storage
 - Use case: Large microscopy datasets on cloud platforms
 
 ## Configuration Examples
@@ -179,10 +179,10 @@ chunk_height=256,chunk_width=256,chunk_bands=3,shard_height=1024,shard_width=102
 - `chunk_*=0`: Use full image dimensions (single chunk)
 - `shard_*=0`: No sharding (chunks stored as individual files)
 
-### OME-NGFF Mode
-- Chunking and sharding work seamlessly with OME-NGFF metadata
+### OME-Zarr Mode
+- Chunking and sharding work seamlessly with OME-Zarr metadata
 - Array stored in `/0/` subdirectory
-- Group metadata includes OME-NGFF v0.5 specification
+- Group metadata includes OME-Zarr v0.5 specification
 - All chunking/sharding features available
 
 ## Testing
@@ -192,8 +192,8 @@ See `test_chunk_vs_shard.sh` for comprehensive test cases demonstrating:
 2. Chunking only
 3. Chunking + sharding
 4. Different chunk sizes
-5. OME-NGFF with chunking
-6. OME-NGFF with chunking + sharding
+5. OME-Zarr with chunking
+6. OME-Zarr with chunking + sharding
 
 Run tests with:
 ```bash

@@ -1,7 +1,7 @@
 /// Simple wrapper around zarrs to expose C-compatible functions for libvips
 /// This allows libvips (C/C++) to use the zarrs library (Rust)
 
-mod ome_ngff;
+mod ome_zarr;
 
 use std::ffi::CStr;
 use std::os::raw::c_char;
@@ -56,7 +56,7 @@ pub extern "C" fn vips_zarr_test() -> i32 {
 /// * `data_type` - Data type: 0=uint8, 1=uint16, 2=uint32, 3=float32, 4=float64
 /// * `data` - Pointer to the image data
 /// * `data_len` - Length of data in bytes
-/// * `ome_ngff` - If 1, write OME-NGFF compatible metadata
+/// * `ome_zarr` - If 1, write OME-Zarr compatible metadata
 /// * `chunk_height` - Chunk height (0 for full image height)
 /// * `chunk_width` - Chunk width (0 for full image width)
 /// * `chunk_bands` - Chunk bands (0 for all bands)
@@ -75,7 +75,7 @@ pub extern "C" fn vips_zarr_write_array(
     data_type: i32,
     data: *const u8,
     data_len: usize,
-    ome_ngff: i32,
+    ome_zarr: i32,
     chunk_height: i32,
     chunk_width: i32,
     chunk_bands: i32,
@@ -96,7 +96,7 @@ pub extern "C" fn vips_zarr_write_array(
         std::slice::from_raw_parts(data, data_len)
     };
     
-    let use_ome_ngff = ome_ngff != 0;
+    let use_ome_zarr = ome_zarr != 0;
     
     // Convert chunk parameters (0 means use full dimension)
     let chunk_shape = if chunk_height > 0 && chunk_width > 0 && chunk_bands > 0 {
@@ -113,7 +113,7 @@ pub extern "C" fn vips_zarr_write_array(
     };
     
     // Call the actual implementation
-    match write_zarr_array(path_str, width, height, bands, data_type, data_slice, use_ome_ngff, chunk_shape, shard_shape) {
+    match write_zarr_array(path_str, width, height, bands, data_type, data_slice, use_ome_zarr, chunk_shape, shard_shape) {
         Ok(_) => 0,
         Err(_) => -1,
     }
@@ -127,7 +127,7 @@ fn write_zarr_array(
     bands: u64,
     data_type_code: i32,
     data: &[u8],
-    ome_ngff: bool,
+    ome_zarr: bool,
     chunk_shape: Option<(u64, u64, u64)>,
     shard_shape: Option<(u64, u64, u64)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -184,9 +184,9 @@ fn write_zarr_array(
         _ => return Err("Unsupported data type".into()),
     };
     
-    // Determine the array path based on OME-NGFF mode
-    // OME-NGFF stores the array in a subdirectory (typically "0")
-    let array_path = if ome_ngff { "/0" } else { "/" };
+    // Determine the array path based on OME-Zarr mode
+    // OME-Zarr stores the array in a subdirectory (typically "0")
+    let array_path = if ome_zarr { "/0" } else { "/" };
     
     // Build array with optional sharding
     // In Zarr v3:
@@ -235,9 +235,9 @@ fn write_zarr_array(
     // Store array metadata
     array.store_metadata()?;
     
-    // If OME-NGFF mode, we need to ensure the group metadata exists before writing OME metadata
+    // If OME-Zarr mode, we need to ensure the group metadata exists before writing OME metadata
     // The store creates the zarr.json for the array in /0, but we also need one at the root
-    if ome_ngff {
+    if ome_zarr {
         // Create a minimal group metadata at the root if it doesn't exist
         let zarr_json_path = Path::new(path).join("zarr.json");
         if !zarr_json_path.exists() {
@@ -261,24 +261,24 @@ fn write_zarr_array(
     // Explicitly drop the array to ensure all writes are flushed
     drop(array);
     
-    // If OME-NGFF mode, write the group-level metadata
-    if ome_ngff {
-        write_ome_ngff_metadata(path, width, height, bands, data_type_code)?;
+    // If OME-Zarr mode, write the group-level metadata
+    if ome_zarr {
+        write_ome_zarr_metadata(path, width, height, bands, data_type_code)?;
     }
     
     Ok(())
 }
 
-/// Write OME-NGFF metadata to the root zarr.json
-fn write_ome_ngff_metadata(
+/// Write OME-Zarr metadata to the root zarr.json
+fn write_ome_zarr_metadata(
     path: &str,
     width: u64,
     height: u64,
     bands: u64,
     data_type_code: i32,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Generate the OME-NGFF metadata
-    let ome_metadata = ome_ngff::generate_ome_ngff_metadata(width, height, bands, data_type_code)?;
+    // Generate the OME-Zarr metadata
+    let ome_metadata = ome_zarr::generate_ome_zarr_metadata(width, height, bands, data_type_code)?;
     
     // Build the path to zarr.json at the root
     let zarr_json_path = Path::new(path).join("zarr.json");
