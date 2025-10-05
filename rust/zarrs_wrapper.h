@@ -37,6 +37,12 @@ int vips_zarr_test(void);
  *   data - Pointer to the image data
  *   data_len - Length of data in bytes
  *   ome_ngff - If 1, write OME-NGFF compatible metadata
+ *   chunk_height - Chunk height (0 for full image height)
+ *   chunk_width - Chunk width (0 for full image width)
+ *   chunk_bands - Chunk bands (0 for all bands)
+ *   shard_height - Shard height (0 for no sharding)
+ *   shard_width - Shard width (0 for no sharding)
+ *   shard_bands - Shard bands (0 for no sharding)
  * 
  * Returns:
  *   0 on success, -1 on error
@@ -49,7 +55,13 @@ int vips_zarr_write_array(
     int32_t data_type,
     const uint8_t *data,
     size_t data_len,
-    int ome_ngff
+    int ome_ngff,
+    int chunk_height,
+    int chunk_width,
+    int chunk_bands,
+    int shard_height,
+    int shard_width,
+    int shard_bands
 );
 
 #ifdef __cplusplus

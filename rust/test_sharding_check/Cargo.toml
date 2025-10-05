@@ -1,0 +1,8 @@
+[package]
+name = "test_sharding_check"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+zarrs = { version = "0.22.1", features = ["filesystem", "gzip", "sharding"] }
+zarrs_filesystem = "0.3"

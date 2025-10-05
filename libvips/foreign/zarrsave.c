@@ -51,6 +51,12 @@ typedef struct _VipsForeignSaveZarr {
 
 	char *filename;
 	gboolean ome_ngff;
+	int chunk_height;
+	int chunk_width;
+	int chunk_bands;
+	int shard_height;
+	int shard_width;
+	int shard_bands;
 } VipsForeignSaveZarr;
 
 typedef VipsForeignSaveClass VipsForeignSaveZarrClass;
@@ -136,7 +142,13 @@ vips_foreign_save_zarr_build(VipsObject *object)
 			data_type,
 			data,
 			data_len,
-			zarr->ome_ngff) < 0) {
+			zarr->ome_ngff,
+			zarr->chunk_height,
+			zarr->chunk_width,
+			zarr->chunk_bands,
+			zarr->shard_height,
+			zarr->shard_width,
+			zarr->shard_bands) < 0) {
 		vips_error("zarrsave", "%s", "failed to write zarr array");
 		return -1;
 	}
@@ -181,6 +193,48 @@ vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveZarr, ome_ngff),
 		FALSE);
+
+	VIPS_ARG_INT(class, "chunk_height", 21,
+		_("Chunk height"),
+		_("Chunk height (0 for full image height)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, chunk_height),
+		0, 100000000, 0);
+
+	VIPS_ARG_INT(class, "chunk_width", 22,
+		_("Chunk width"),
+		_("Chunk width (0 for full image width)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, chunk_width),
+		0, 100000000, 0);
+
+	VIPS_ARG_INT(class, "chunk_bands", 23,
+		_("Chunk bands"),
+		_("Chunk bands (0 for all bands)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, chunk_bands),
+		0, 100000, 0);
+
+	VIPS_ARG_INT(class, "shard_height", 24,
+		_("Shard height"),
+		_("Shard height (0 for no sharding)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, shard_height),
+		0, 100000000, 0);
+
+	VIPS_ARG_INT(class, "shard_width", 25,
+		_("Shard width"),
+		_("Shard width (0 for no sharding)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, shard_width),
+		0, 100000000, 0);
+
+	VIPS_ARG_INT(class, "shard_bands", 26,
+		_("Shard bands"),
+		_("Shard bands (0 for no sharding)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, shard_bands),
+		0, 100000, 0);
 }
 
 static void
@@ -197,6 +251,12 @@ vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
  * Optional arguments:
  *
  * * @ome_ngff: %gboolean, write OME-NGFF compatible metadata
+ * * @chunk_height: %gint, chunk height (0 for full image height)
+ * * @chunk_width: %gint, chunk width (0 for full image width)
+ * * @chunk_bands: %gint, chunk bands (0 for all bands)
+ * * @shard_height: %gint, shard height (0 for no sharding)
+ * * @shard_width: %gint, shard width (0 for no sharding)
+ * * @shard_bands: %gint, shard bands (0 for no sharding)
  *
  * Write @in to a Zarr v3 format array at @filename.
  *
@@ -204,8 +264,27 @@ vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
  * N-dimensional arrays. This operation creates a Zarr v3 compatible
  * array store on the filesystem.
  *
- * The image is written with shape [height, width, bands] and saved
- * as a single chunk with gzip compression.
+ * The image is written with shape [height, width, bands]. By default,
+ * it is saved as a single chunk with gzip compression.
+ *
+ * Chunking divides the array into regular blocks for efficient access:
+ * - If @chunk_height, @chunk_width, and @chunk_bands are specified (all > 0),
+ *   the array will be divided into chunks of that size
+ * - If chunk parameters are 0 (default), the entire image is one chunk
+ * - Chunks are the basic unit of I/O in Zarr
+ *
+ * Sharding is an optimization that groups multiple chunks together:
+ * - If @shard_height, @shard_width, and @shard_bands are specified (all > 0),
+ *   multiple chunks will be grouped into larger shard files
+ * - Sharding reduces file count and improves cloud storage performance
+ * - Shard dimensions should be multiples of chunk dimensions
+ * - If sharding is enabled, chunks must also be specified
+ *
+ * Example configurations:
+ * - No chunking (default): Full image as one file
+ * - Chunking only: Multiple chunk files (e.g., 256×256×3 chunks)
+ * - Chunking + sharding: Chunks grouped in shards (e.g., 128×128×3 chunks 
+ *   in 256×256×3 shards → 4 chunks per shard file)
  *
  * Supported data types are: uint8, uint16, uint32, float32, float64.
  *

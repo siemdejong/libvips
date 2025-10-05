@@ -9,7 +9,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::fs;
 
-use zarrs::array::{ArrayBuilder, DataType, FillValue};
+use zarrs::array::{ArrayBuilder, DataType, FillValue, ChunkShape};
 use zarrs::array::codec::GzipCodec;
 use zarrs::array_subset::ArraySubset;
 use zarrs_filesystem::FilesystemStore;
@@ -57,6 +57,12 @@ pub extern "C" fn vips_zarr_test() -> i32 {
 /// * `data` - Pointer to the image data
 /// * `data_len` - Length of data in bytes
 /// * `ome_ngff` - If 1, write OME-NGFF compatible metadata
+/// * `chunk_height` - Chunk height (0 for full image height)
+/// * `chunk_width` - Chunk width (0 for full image width)
+/// * `chunk_bands` - Chunk bands (0 for all bands)
+/// * `shard_height` - Shard height (0 for no sharding)
+/// * `shard_width` - Shard width (0 for no sharding)
+/// * `shard_bands` - Shard bands (0 for no sharding)
 /// 
 /// # Returns
 /// * 0 on success, -1 on error
@@ -70,6 +76,12 @@ pub extern "C" fn vips_zarr_write_array(
     data: *const u8,
     data_len: usize,
     ome_ngff: i32,
+    chunk_height: i32,
+    chunk_width: i32,
+    chunk_bands: i32,
+    shard_height: i32,
+    shard_width: i32,
+    shard_bands: i32,
 ) -> i32 {
     // Convert C string to Rust string
     let path_str = unsafe {
@@ -86,8 +98,22 @@ pub extern "C" fn vips_zarr_write_array(
     
     let use_ome_ngff = ome_ngff != 0;
     
+    // Convert chunk parameters (0 means use full dimension)
+    let chunk_shape = if chunk_height > 0 && chunk_width > 0 && chunk_bands > 0 {
+        Some((chunk_height as u64, chunk_width as u64, chunk_bands as u64))
+    } else {
+        None
+    };
+    
+    // Convert shard parameters (0 means no sharding)
+    let shard_shape = if shard_height > 0 && shard_width > 0 && shard_bands > 0 {
+        Some((shard_height as u64, shard_width as u64, shard_bands as u64))
+    } else {
+        None
+    };
+    
     // Call the actual implementation
-    match write_zarr_array(path_str, width, height, bands, data_type, data_slice, use_ome_ngff) {
+    match write_zarr_array(path_str, width, height, bands, data_type, data_slice, use_ome_ngff, chunk_shape, shard_shape) {
         Ok(_) => 0,
         Err(_) => -1,
     }
@@ -102,6 +128,8 @@ fn write_zarr_array(
     data_type_code: i32,
     data: &[u8],
     ome_ngff: bool,
+    chunk_shape: Option<(u64, u64, u64)>,
+    shard_shape: Option<(u64, u64, u64)>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Map data type code to zarrs DataType
     let data_type = match data_type_code {
@@ -119,9 +147,30 @@ fn write_zarr_array(
     // Array shape: [height, width, bands] for interleaved data
     let array_shape = vec![height, width, bands];
     
-    // Chunk shape: use full image as one chunk for simplicity
-    // In production, you'd want smaller chunks
-    let chunk_shape = array_shape.clone();
+    // Determine chunk shape and outer chunk shape (for sharding)
+    // If chunk_shape is not provided, default to full image size
+    let inner_chunk_dims = chunk_shape.unwrap_or((height, width, bands));
+    
+    // Outer chunk shape (shard boundaries in the chunk grid)
+    // If sharding is enabled, this is the shard size
+    // If sharding is not enabled, this is the same as inner chunk size
+    let outer_chunk_dims = if let Some((sh, sw, sb)) = shard_shape {
+        // Validate that shard dimensions are multiples of chunk dimensions
+        if inner_chunk_dims.0 > 0 && sh % inner_chunk_dims.0 != 0 {
+            eprintln!("Warning: shard_height ({}) is not a multiple of chunk_height ({})", sh, inner_chunk_dims.0);
+        }
+        if inner_chunk_dims.1 > 0 && sw % inner_chunk_dims.1 != 0 {
+            eprintln!("Warning: shard_width ({}) is not a multiple of chunk_width ({})", sw, inner_chunk_dims.1);
+        }
+        if inner_chunk_dims.2 > 0 && sb % inner_chunk_dims.2 != 0 {
+            eprintln!("Warning: shard_bands ({}) is not a multiple of chunk_bands ({})", sb, inner_chunk_dims.2);
+        }
+        (sh, sw, sb)
+    } else {
+        inner_chunk_dims
+    };
+    
+    let outer_chunk_shape = vec![outer_chunk_dims.0, outer_chunk_dims.1, outer_chunk_dims.2];
     
     // Create array builder
     // API: ArrayBuilder::new(shape, chunk_grid_metadata, data_type, fill_value)
@@ -139,16 +188,49 @@ fn write_zarr_array(
     // OME-NGFF stores the array in a subdirectory (typically "0")
     let array_path = if ome_ngff { "/0" } else { "/" };
     
-    let array = ArrayBuilder::new(
-        array_shape.clone(),
-        chunk_shape.as_slice(),  // chunk_grid_metadata
-        data_type.clone(),
-        fill_value,
-    )
-    .bytes_to_bytes_codecs(vec![
-        Arc::new(GzipCodec::new(5)?),
-    ])
-    .build(store.clone(), array_path)?;
+    // Build array with optional sharding
+    // In Zarr v3:
+    // - The chunk_grid defines the outer chunks (shards if sharding is used)
+    // - The ShardingCodec's inner_chunk_shape defines the logical chunks within shards
+    // - Without sharding, chunks are stored as individual files
+    // - With sharding, multiple chunks are grouped into shard files
+    let array = if shard_shape.is_some() {
+        // With sharding: use ShardingCodec as array_to_bytes codec
+        // Outer chunks (shards) contain multiple inner chunks
+        use zarrs::array::codec::ShardingCodecBuilder;
+        
+        // Inner chunk shape within each shard
+        let inner_chunk_shape: ChunkShape = vec![inner_chunk_dims.0, inner_chunk_dims.1, inner_chunk_dims.2]
+            .try_into()
+            .map_err(|e| format!("Invalid inner chunk shape: {:?}", e))?;
+        
+        let sharding_codec = ShardingCodecBuilder::new(inner_chunk_shape)
+            .bytes_to_bytes_codecs(vec![
+                Arc::new(GzipCodec::new(5)?),
+            ])
+            .build();
+        
+        ArrayBuilder::new(
+            array_shape.clone(),
+            outer_chunk_shape.as_slice(),  // Shard boundaries in the chunk grid
+            data_type.clone(),
+            fill_value,
+        )
+        .array_to_bytes_codec(Arc::new(sharding_codec))
+        .build(store.clone(), array_path)?
+    } else {
+        // Without sharding: chunks are stored as individual files with gzip compression
+        ArrayBuilder::new(
+            array_shape.clone(),
+            outer_chunk_shape.as_slice(),  // Chunk boundaries
+            data_type.clone(),
+            fill_value,
+        )
+        .bytes_to_bytes_codecs(vec![
+            Arc::new(GzipCodec::new(5)?),
+        ])
+        .build(store.clone(), array_path)?
+    };
     
     // Store array metadata
     array.store_metadata()?;
