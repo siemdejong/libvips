@@ -57,6 +57,7 @@ typedef struct _VipsForeignSaveZarr {
 	int shard_height;
 	int shard_width;
 	int shard_bands;
+	VipsForeignZarrCompression compression;
 } VipsForeignSaveZarr;
 
 typedef VipsForeignSaveClass VipsForeignSaveZarrClass;
@@ -148,7 +149,8 @@ vips_foreign_save_zarr_build(VipsObject *object)
 			zarr->chunk_bands,
 			zarr->shard_height,
 			zarr->shard_width,
-			zarr->shard_bands) < 0) {
+			zarr->shard_bands,
+			zarr->compression) < 0) {
 		vips_error("zarrsave", "%s", "failed to write zarr array");
 		return -1;
 	}
@@ -235,6 +237,14 @@ vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveZarr, shard_bands),
 		0, 100000, 0);
+
+	VIPS_ARG_ENUM(class, "compression", 27,
+		_("Compression"),
+		_("Compression codec (gzip or zstd)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, compression),
+		VIPS_TYPE_FOREIGN_ZARR_COMPRESSION,
+		VIPS_FOREIGN_ZARR_COMPRESSION_GZIP);
 }
 
 static void
@@ -257,6 +267,7 @@ vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
  * * @shard_height: %gint, shard height (0 for no sharding)
  * * @shard_width: %gint, shard width (0 for no sharding)
  * * @shard_bands: %gint, shard bands (0 for no sharding)
+ * * @compression: #VipsForeignZarrCompression, compression codec
  *
  * Write @in to a Zarr v3 format array at @filename.
  *
@@ -266,6 +277,10 @@ vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
  *
  * The image is written with shape [height, width, bands]. By default,
  * it is saved as a single chunk with gzip compression.
+ *
+ * Use @compression to select the compression codec:
+ * - GZIP (default): Good compression with wide compatibility
+ * - ZSTD: Better compression ratios and faster decompression
  *
  * Chunking divides the array into regular blocks for efficient access:
  * - If @chunk_height, @chunk_width, and @chunk_bands are specified (all > 0),

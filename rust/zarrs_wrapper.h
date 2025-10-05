@@ -43,6 +43,7 @@ int vips_zarr_test(void);
  *   shard_height - Shard height (0 for no sharding)
  *   shard_width - Shard width (0 for no sharding)
  *   shard_bands - Shard bands (0 for no sharding)
+ *   compression - Compression codec: 0=gzip, 1=zstd
  * 
  * Returns:
  *   0 on success, -1 on error
@@ -61,7 +62,8 @@ int vips_zarr_write_array(
     int chunk_bands,
     int shard_height,
     int shard_width,
-    int shard_bands
+    int shard_bands,
+    int compression
 );
 
 #ifdef __cplusplus

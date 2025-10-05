@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::fs;
 
 use zarrs::array::{ArrayBuilder, DataType, FillValue, ChunkShape};
-use zarrs::array::codec::GzipCodec;
+use zarrs::array::codec::{GzipCodec, ZstdCodec};
 use zarrs::array_subset::ArraySubset;
 use zarrs_filesystem::FilesystemStore;
 use serde_json::json;
@@ -63,6 +63,7 @@ pub extern "C" fn vips_zarr_test() -> i32 {
 /// * `shard_height` - Shard height (0 for no sharding)
 /// * `shard_width` - Shard width (0 for no sharding)
 /// * `shard_bands` - Shard bands (0 for no sharding)
+/// * `compression` - Compression codec: 0=gzip, 1=zstd
 /// 
 /// # Returns
 /// * 0 on success, -1 on error
@@ -82,6 +83,7 @@ pub extern "C" fn vips_zarr_write_array(
     shard_height: i32,
     shard_width: i32,
     shard_bands: i32,
+    compression: i32,
 ) -> i32 {
     // Convert C string to Rust string
     let path_str = unsafe {
@@ -113,7 +115,7 @@ pub extern "C" fn vips_zarr_write_array(
     };
     
     // Call the actual implementation
-    match write_zarr_array(path_str, width, height, bands, data_type, data_slice, use_ome_zarr, chunk_shape, shard_shape) {
+    match write_zarr_array(path_str, width, height, bands, data_type, data_slice, use_ome_zarr, chunk_shape, shard_shape, compression) {
         Ok(_) => 0,
         Err(_) => -1,
     }
@@ -130,6 +132,7 @@ fn write_zarr_array(
     ome_zarr: bool,
     chunk_shape: Option<(u64, u64, u64)>,
     shard_shape: Option<(u64, u64, u64)>,
+    compression: i32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Map data type code to zarrs DataType
     let data_type = match data_type_code {
@@ -188,6 +191,13 @@ fn write_zarr_array(
     // OME-Zarr stores the array in a subdirectory (typically "0")
     let array_path = if ome_zarr { "/0" } else { "/" };
     
+    // Create compression codec based on the compression parameter
+    // 0 = gzip (default), 1 = zstd
+    let compression_codec: Arc<dyn zarrs::array::codec::BytesToBytesCodecTraits> = match compression {
+        1 => Arc::new(ZstdCodec::new(3, true)), // zstd with level 3 and checksum
+        _ => Arc::new(GzipCodec::new(5)?), // gzip with level 5 (default)
+    };
+    
     // Build array with optional sharding
     // In Zarr v3:
     // - The chunk_grid defines the outer chunks (shards if sharding is used)
@@ -205,9 +215,7 @@ fn write_zarr_array(
             .map_err(|e| format!("Invalid inner chunk shape: {:?}", e))?;
         
         let sharding_codec = ShardingCodecBuilder::new(inner_chunk_shape)
-            .bytes_to_bytes_codecs(vec![
-                Arc::new(GzipCodec::new(5)?),
-            ])
+            .bytes_to_bytes_codecs(vec![compression_codec])
             .build();
         
         ArrayBuilder::new(
@@ -219,16 +227,14 @@ fn write_zarr_array(
         .array_to_bytes_codec(Arc::new(sharding_codec))
         .build(store.clone(), array_path)?
     } else {
-        // Without sharding: chunks are stored as individual files with gzip compression
+        // Without sharding: chunks are stored as individual files with selected compression
         ArrayBuilder::new(
             array_shape.clone(),
             outer_chunk_shape.as_slice(),  // Chunk boundaries
             data_type.clone(),
             fill_value,
         )
-        .bytes_to_bytes_codecs(vec![
-            Arc::new(GzipCodec::new(5)?),
-        ])
+        .bytes_to_bytes_codecs(vec![compression_codec])
         .build(store.clone(), array_path)?
     };
     

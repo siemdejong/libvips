@@ -1098,6 +1098,22 @@ typedef enum {
 	VIPS_FOREIGN_HEIF_ENCODER_LAST	/*< skip >*/
 } VipsForeignHeifEncoder;
 
+/**
+ * VipsForeignZarrCompression:
+ * @VIPS_FOREIGN_ZARR_COMPRESSION_GZIP: gzip compression
+ * @VIPS_FOREIGN_ZARR_COMPRESSION_ZSTD: zstd compression
+ *
+ * The compression types supported by the zarr writer.
+ *
+ * GZIP is the default and provides good compression with wide compatibility.
+ * ZSTD typically offers better compression ratios and faster decompression.
+ */
+typedef enum {
+	VIPS_FOREIGN_ZARR_COMPRESSION_GZIP,
+	VIPS_FOREIGN_ZARR_COMPRESSION_ZSTD,
+	VIPS_FOREIGN_ZARR_COMPRESSION_LAST	/*< skip >*/
+} VipsForeignZarrCompression;
+
 #ifdef __cplusplus
 }
 #endif /*__cplusplus*/

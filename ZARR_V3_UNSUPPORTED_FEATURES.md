@@ -79,11 +79,13 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 
 #### Supported
 - ✅ `gzip` - Gzip compression (level 5, hardcoded)
+- ✅ `zstd` - Zstd compression (level 3 with checksum)
 
 #### Not Supported
 - ❌ Configurable gzip compression level (currently fixed to level 5)
+- ❌ Configurable zstd compression level (currently fixed to level 3)
+- ❌ Configurable zstd checksum (currently always enabled)
 - ❌ `blosc` - Blosc compression
-- ❌ `zstd` - Zstd compression
 - ❌ `crc32c` - CRC32C checksum
 - ❌ Extension codecs (custom compression/encoding)
 
@@ -355,7 +357,7 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 
 **Supported Features:**
 - Core data types: 5 of 13 (38%)
-- Codecs: 2 of 10+ (20%)
+- Codecs: 3 of 10+ (30%)
 - Operations: Write-only (0% read support)
 - Metadata: Basic required fields only
 
@@ -364,7 +366,7 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 - ❌ Groups and hierarchies (0%)
 - ❌ Storage transformers (0%)
 - ❌ Extensions system (0%)
-- ❌ Most codecs (80%)
+- ❌ Most codecs (70%)
 - ❌ Most data types (62%)
 - ❌ Advanced OME-NGFF features (70%)
 
@@ -372,7 +374,7 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 - **Basic Write**: ✅ Functional
 - **Basic Read**: ❌ Not implemented
 - **Advanced Features**: ❌ Mostly not implemented
-- **Spec Compliance**: ~15-20% of full v3.1 specification
+- **Spec Compliance**: ~20-25% of full v3.1 specification
 
 ---
 
@@ -400,7 +402,7 @@ Based on the spec analysis, high-priority additions would be:
 
 1. **Read Operations** - Essential for round-trip support
 2. **Additional Data Types** - int8, int16, int32 for scientific data
-3. **Additional Codecs** - blosc, zstd for better compression
+3. **Additional Codecs** - blosc for better compression, configurable compression levels
 4. **Multi-Resolution Pyramids** - Full OME-NGFF support
 5. **Groups** - Hierarchical organization
 6. **Cloud Storage** - S3/HTTP support
