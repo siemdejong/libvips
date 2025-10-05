@@ -1,8 +1,0 @@
-[wrap-git]
-url = https://github.com/google/tensorstore.git
-revision = v0.1.77
-depth = 1
-patch_directory = tensorstore
-
-[provide]
-dependency_names = tensorstore
