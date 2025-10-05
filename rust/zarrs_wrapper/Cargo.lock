@@ -1270,6 +1270,7 @@ dependencies = [
 name = "zarrs_wrapper"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "zarrs",
  "zarrs_filesystem",
 ]

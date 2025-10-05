@@ -40,9 +40,17 @@ libvips now supports saving images in Zarr v3 format through a new `zarrsave` op
 
 ### Zarr v3 Format
 - Metadata stored in `zarr.json`
-- Chunks stored in `c/x/y/z` directory structure
+- Chunks stored in `c/x/y/z` directory structure  
 - Gzip compression applied to chunks
 - Optimization: chunks containing only fill values are not written
+
+### OME-NGFF Support
+- Optional OME-NGFF (Open Microscopy Environment - Next Generation File Format) v0.5 compatible output
+- Proper `multiscales` metadata with `axes`, `datasets`, and `coordinateTransformations`
+- Automatic axis detection (channel, spatial y/x)
+- Array stored in subdirectory (`0/`) per OME-NGFF specification
+- Physical units (micrometers) for spatial axes
+- Compatible with OME-Zarr readers and visualization tools
 
 ## Usage
 
@@ -57,16 +65,35 @@ vips invert test.v test_white.v
 vips copy test_white.v test.zarr
 ```
 
+### OME-NGFF Example
+```bash
+# Save with OME-NGFF metadata
+vips copy input.tif output.zarr[ome_ngff]
+
+# Or explicitly set the option
+vips copy input.tif output.zarr[ome_ngff=true]
+
+# Regular Zarr without OME metadata
+vips copy input.tif output.zarr[ome_ngff=false]
+```
+
 ### Verify Output
 ```bash
 # Check metadata
 cat output.zarr/zarr.json
 
-# List chunk files
+# For regular Zarr
 find output.zarr/c -type f
 
+# For OME-NGFF Zarr
+find output.zarr/0/c -type f
+
 # Verify chunk compression
-file output.zarr/c/0/0/0
+file output.zarr/c/0/0/0  # regular
+file output.zarr/0/c/0/0/0  # OME-NGFF
+
+# View OME-NGFF metadata
+cat output.zarr/zarr.json | grep -A 30 '"ome"'
 ```
 
 ## Implementation Details
@@ -76,6 +103,44 @@ Images are stored with shape `[height, width, bands]` to match VIPS' memory layo
 - Single-band: `[H, W, 1]`
 - RGB: `[H, W, 3]`
 - RGBA: `[H, W, 4]`
+
+### OME-NGFF Metadata Structure
+When `ome_ngff=true`, the output conforms to OME-NGFF v0.5:
+
+```json
+{
+  "zarr_format": 3,
+  "node_type": "group",
+  "attributes": {
+    "ome": {
+      "version": "0.5",
+      "multiscales": [{
+        "version": "0.5",
+        "name": "libvips-zarr",
+        "axes": [
+          {"name": "c", "type": "channel"},  // Only if bands > 1
+          {"name": "y", "type": "space", "unit": "micrometer"},
+          {"name": "x", "type": "space", "unit": "micrometer"}
+        ],
+        "datasets": [{
+          "path": "0",
+          "coordinateTransformations": [{
+            "type": "scale",
+            "scale": [1.0, 1.0, 1.0]  // [c, y, x] or [y, x]
+          }]
+        }]
+      }]
+    }
+  }
+}
+```
+
+**Key differences from regular Zarr:**
+- Array stored in `0/` subdirectory instead of root
+- Group-level metadata with OME namespace
+- Axes definitions with types and units
+- Coordinate transformations (scale)
+- Compatible with OME-Zarr viewers and analysis tools
 
 ### Chunking Strategy
 Currently uses the entire image as a single chunk for simplicity:
@@ -138,6 +203,7 @@ The Rust library is built as part of the Meson build:
 3. **No chunk cache**: Future optimization opportunity
 4. **Gzip only**: No alternative codecs (e.g., blosc, zstd)
 5. **No metadata**: Custom VIPS metadata not preserved
+6. **Single resolution**: OME-NGFF output only includes one resolution level
 
 ## Future Enhancements
 
@@ -148,15 +214,18 @@ The Rust library is built as part of the Meson build:
 - [ ] Read support (zarrload)
 - [ ] Support for Zarr v2 format
 - [ ] Parallel chunk writing
+- [ ] Multi-resolution pyramids for OME-NGFF
+- [ ] Labels support for OME-NGFF segmentation data
 
 ## Files Modified/Added
 
 ### New Files
-- `rust/zarrs_wrapper/Cargo.toml` - Rust project configuration
-- `rust/zarrs_wrapper/src/lib.rs` - FFI implementation
+- `rust/zarrs_wrapper/Cargo.toml` - Rust project configuration (with serde_json dependency)
+- `rust/zarrs_wrapper/src/lib.rs` - FFI implementation with OME-NGFF support
+- `rust/zarrs_wrapper/src/ome_ngff.rs` - OME-NGFF metadata generation
 - `rust/zarrs_wrapper.h` - C header for FFI functions
 - `rust/meson.build` - Rust build integration
-- `libvips/foreign/zarrsave.c` - VipsForeignSave implementation
+- `libvips/foreign/zarrsave.c` - VipsForeignSave implementation with ome_ngff option
 - `test_zarrsave.sh` - Test script
 
 ### Modified Files
@@ -167,6 +236,7 @@ The Rust library is built as part of the Meson build:
 ## References
 
 - Zarr v3 Specification: https://zarr-specs.readthedocs.io/en/latest/v3/core/v3.0.html
+- OME-NGFF Specification v0.5: https://ngff.openmicroscopy.org/0.5/
 - zarrs Rust library: https://github.com/zarrs/zarrs
 - libvips: https://www.libvips.org/
 

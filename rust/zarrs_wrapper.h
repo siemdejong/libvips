@@ -36,6 +36,7 @@ int vips_zarr_test(void);
  *   data_type - Data type: 0=uint8, 1=uint16, 2=uint32, 3=float32, 4=float64
  *   data - Pointer to the image data
  *   data_len - Length of data in bytes
+ *   ome_ngff - If 1, write OME-NGFF compatible metadata
  * 
  * Returns:
  *   0 on success, -1 on error
@@ -47,7 +48,8 @@ int vips_zarr_write_array(
     uint64_t bands,
     int32_t data_type,
     const uint8_t *data,
-    size_t data_len
+    size_t data_len,
+    int ome_ngff
 );
 
 #ifdef __cplusplus

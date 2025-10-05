@@ -50,6 +50,7 @@ typedef struct _VipsForeignSaveZarr {
 	VipsForeignSave parent_object;
 
 	char *filename;
+	gboolean ome_ngff;
 } VipsForeignSaveZarr;
 
 typedef VipsForeignSaveClass VipsForeignSaveZarrClass;
@@ -134,7 +135,8 @@ vips_foreign_save_zarr_build(VipsObject *object)
 			in->Bands,
 			data_type,
 			data,
-			data_len) < 0) {
+			data_len,
+			zarr->ome_ngff) < 0) {
 		vips_error("zarrsave", "%s", "failed to write zarr array");
 		return -1;
 	}
@@ -172,6 +174,13 @@ vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 		VIPS_ARGUMENT_REQUIRED_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveZarr, filename),
 		NULL);
+
+	VIPS_ARG_BOOL(class, "ome_ngff", 20,
+		_("OME-NGFF"),
+		_("Write OME-NGFF (Open Microscopy Environment) compatible metadata"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, ome_ngff),
+		FALSE);
 }
 
 static void
@@ -185,6 +194,10 @@ vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
  * @filename: file to write to
  * @...: %NULL-terminated list of optional named arguments
  *
+ * Optional arguments:
+ *
+ * * @ome_ngff: %gboolean, write OME-NGFF compatible metadata
+ *
  * Write @in to a Zarr v3 format array at @filename.
  *
  * The Zarr format is a specification for chunked, compressed, 
@@ -195,6 +208,12 @@ vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
  * as a single chunk with gzip compression.
  *
  * Supported data types are: uint8, uint16, uint32, float32, float64.
+ *
+ * If @ome_ngff is TRUE, the output will conform to the OME-NGFF
+ * (Open Microscopy Environment - Next Generation File Format) 
+ * specification v0.5, with proper multiscales metadata, axes 
+ * definitions, and coordinate transformations. The array will be
+ * stored in a '0' subdirectory with group-level metadata.
  *
  * See also: vips_image_write_to_file().
  *
