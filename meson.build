@@ -1,4 +1,4 @@
-project('vips', 'c', 'cpp',
+project('vips', 'c', 'cpp', 'rust',
     version: '8.18.0',
     meson_version: '>=0.55',
     default_options: [
@@ -662,6 +662,12 @@ config_dep = declare_dependency(
     include_directories: include_directories('.'),
     compile_args: '-DHAVE_CONFIG_H',
 )
+
+# Build rust dependencies before forming libvips_deps
+subdir('rust')
+
+# Add zarrs wrapper to external dependencies
+external_deps += zarrs_wrapper_dep
 
 libvips_deps = [config_dep] + external_deps + other_deps
 

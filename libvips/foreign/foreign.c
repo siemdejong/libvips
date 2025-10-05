@@ -3094,6 +3094,8 @@ vips_foreign_operation_init(void)
 	extern GType vips_foreign_save_uhdr_buffer_get_type(void);
 	extern GType vips_foreign_save_uhdr_target_get_type(void);
 
+	extern GType vips_foreign_save_zarr_file_get_type(void);
+
 	vips_foreign_load_csv_file_get_type();
 	vips_foreign_load_csv_source_get_type();
 	vips_foreign_save_csv_file_get_type();
@@ -3314,6 +3316,9 @@ vips_foreign_operation_init(void)
 	vips_foreign_save_heif_target_get_type();
 	vips_foreign_save_avif_target_get_type();
 #endif /*defined(HAVE_HEIF) && !defined(HEIF_MODULE)*/
+
+	/* Always register zarrsave - it's built in */
+	vips_foreign_save_zarr_file_get_type();
 
 	vips__foreign_load_operation =
 		g_quark_from_static_string("vips-foreign-load-operation");
