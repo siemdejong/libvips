@@ -618,7 +618,12 @@ vips_foreign_find_load(const char *name)
 			_("file \"%s\" does not exist"), name);
 		return NULL;
 	}
-	if (vips_isdirf("%s", filename)) {
+	/* Zarr files are directories, so skip the directory check for them.
+	 * Handle both .zarr and .zarr/ (with trailing slash).
+	 */
+	if (vips_isdirf("%s", filename) &&
+		!g_str_has_suffix(filename, ".zarr") &&
+		!g_str_has_suffix(filename, ".zarr/")) {
 		vips_error("VipsForeignLoad",
 			_("\"%s\" is a directory"), name);
 		return NULL;
@@ -3094,6 +3099,7 @@ vips_foreign_operation_init(void)
 	extern GType vips_foreign_save_uhdr_buffer_get_type(void);
 	extern GType vips_foreign_save_uhdr_target_get_type(void);
 
+	extern GType vips_foreign_load_zarr_file_get_type(void);
 	extern GType vips_foreign_save_zarr_file_get_type(void);
 
 	vips_foreign_load_csv_file_get_type();
@@ -3317,7 +3323,8 @@ vips_foreign_operation_init(void)
 	vips_foreign_save_avif_target_get_type();
 #endif /*defined(HAVE_HEIF) && !defined(HEIF_MODULE)*/
 
-	/* Always register zarrsave - it's built in */
+	/* Always register zarrload and zarrsave - they're built in */
+	vips_foreign_load_zarr_file_get_type();
 	vips_foreign_save_zarr_file_get_type();
 
 	vips__foreign_load_operation =

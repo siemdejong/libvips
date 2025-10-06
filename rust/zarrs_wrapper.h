@@ -146,6 +146,75 @@ int vips_zarr_write_pyramid_metadata(
     int32_t data_type
 );
 
+/* Reading API */
+
+/* Opaque handle to zarr array reader */
+typedef void *VipsZarrReadHandle;
+
+/* Open a zarr array for reading
+ *
+ * Arguments:
+ *   path - Path to the zarr store directory
+ *
+ * Returns:
+ *   Handle on success, NULL on error
+ */
+VipsZarrReadHandle vips_zarr_open(const char *path);
+
+/* Get metadata from an open zarr array
+ *
+ * Arguments:
+ *   handle - Handle returned by vips_zarr_open
+ *   width - Pointer to receive image width
+ *   height - Pointer to receive image height
+ *   bands - Pointer to receive number of bands
+ *   data_type - Pointer to receive data type code (same as vips_zarr_init_array)
+ *
+ * Returns:
+ *   0 on success, -1 on error
+ */
+int vips_zarr_get_metadata(
+    VipsZarrReadHandle handle,
+    uint64_t *width,
+    uint64_t *height,
+    uint64_t *bands,
+    int32_t *data_type
+);
+
+/* Read a region from an open zarr array
+ *
+ * Arguments:
+ *   handle - Handle returned by vips_zarr_open
+ *   x - X offset of the region
+ *   y - Y offset of the region
+ *   width - Width of the region
+ *   height - Height of the region
+ *   data - Pre-allocated buffer to receive the data
+ *   data_len - Length of data buffer in bytes
+ *
+ * Returns:
+ *   0 on success, -1 on error
+ */
+int vips_zarr_read_region(
+    VipsZarrReadHandle handle,
+    uint64_t x,
+    uint64_t y,
+    uint64_t width,
+    uint64_t height,
+    uint8_t *data,
+    size_t data_len
+);
+
+/* Close a zarr array and free resources
+ *
+ * Arguments:
+ *   handle - Handle returned by vips_zarr_open
+ *
+ * Returns:
+ *   0 on success, -1 on error
+ */
+int vips_zarr_close(VipsZarrReadHandle handle);
+
 #ifdef __cplusplus
 }
 #endif

@@ -881,3 +881,175 @@ fn finalize_zarr_array_no_metadata(
     drop(ctx.array);
     Ok(())
 }
+
+// ===== Reading API =====
+
+/// Context for reading from a zarr array
+struct ZarrReadContext {
+    array: Array<FilesystemStore>,
+    width: u64,
+    height: u64,
+    bands: u64,
+    data_type_code: i32,
+}
+
+/// Open a zarr array for reading
+/// Returns handle containing array metadata, or NULL on error
+#[no_mangle]
+pub extern "C" fn vips_zarr_open(
+    path: *const c_char,
+) -> *mut std::ffi::c_void {
+    if path.is_null() {
+        return std::ptr::null_mut();
+    }
+    
+    let path_str = match unsafe { CStr::from_ptr(path).to_str() } {
+        Ok(s) => s,
+        Err(_) => return std::ptr::null_mut(),
+    };
+    
+    match open_zarr_array(path_str) {
+        Ok(ctx) => Box::into_raw(Box::new(ctx)) as *mut std::ffi::c_void,
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Get dimensions and data type from an open zarr array
+#[no_mangle]
+pub extern "C" fn vips_zarr_get_metadata(
+    handle: *mut std::ffi::c_void,
+    width: *mut u64,
+    height: *mut u64,
+    bands: *mut u64,
+    data_type: *mut i32,
+) -> i32 {
+    if handle.is_null() || width.is_null() || height.is_null() || 
+       bands.is_null() || data_type.is_null() {
+        return -1;
+    }
+    
+    let ctx = unsafe { &*(handle as *const ZarrReadContext) };
+    
+    unsafe {
+        *width = ctx.width;
+        *height = ctx.height;
+        *bands = ctx.bands;
+        *data_type = ctx.data_type_code;
+    }
+    
+    0
+}
+
+/// Read a region from an open zarr array
+/// The output buffer must be pre-allocated with size width*height*bands*element_size
+#[no_mangle]
+pub extern "C" fn vips_zarr_read_region(
+    handle: *mut std::ffi::c_void,
+    x: u64,
+    y: u64,
+    width: u64,
+    height: u64,
+    data: *mut u8,
+    data_len: usize,
+) -> i32 {
+    if handle.is_null() || data.is_null() {
+        return -1;
+    }
+    
+    let ctx = unsafe { &*(handle as *const ZarrReadContext) };
+    
+    // Convert raw pointer to slice
+    let buffer = unsafe { std::slice::from_raw_parts_mut(data, data_len) };
+    
+    match read_zarr_region(ctx, x, y, width, height, buffer) {
+        Ok(_) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Close a zarr array and free resources
+#[no_mangle]
+pub extern "C" fn vips_zarr_close(handle: *mut std::ffi::c_void) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    
+    // Convert handle back to Box and drop it
+    unsafe { Box::from_raw(handle as *mut ZarrReadContext) };
+    
+    0
+}
+
+/// Internal function to open a zarr array for reading
+fn open_zarr_array(
+    path: &str,
+) -> Result<ZarrReadContext, Box<dyn std::error::Error>> {
+    // Create filesystem store
+    let store = Arc::new(FilesystemStore::new(Path::new(path))?);
+    
+    // Open the array at the root (use "/" for root arrays)
+    let array = Array::open(store, "/")?;
+    
+    // Get array shape and data type
+    let shape = array.shape();
+    
+    // Expected shape is [height, width, bands] or [height, width]
+    let (height, width, bands) = if shape.len() == 3 {
+        (shape[0], shape[1], shape[2])
+    } else if shape.len() == 2 {
+        (shape[0], shape[1], 1)
+    } else {
+        return Err("Unsupported array shape".into());
+    };
+    
+    // Map data type to code
+    let data_type_code = match array.data_type() {
+        DataType::UInt8 => 0,
+        DataType::UInt16 => 1,
+        DataType::UInt32 => 2,
+        DataType::Float32 => 3,
+        DataType::Float64 => 4,
+        DataType::Int8 => 5,
+        DataType::Int16 => 6,
+        DataType::Int32 => 7,
+        DataType::UInt64 => 8,
+        DataType::Int64 => 9,
+        DataType::Complex64 => 10,
+        DataType::Complex128 => 11,
+        _ => return Err("Unsupported data type".into()),
+    };
+    
+    Ok(ZarrReadContext {
+        array,
+        width,
+        height,
+        bands,
+        data_type_code,
+    })
+}
+
+/// Internal function to read a region from a zarr array
+fn read_zarr_region(
+    ctx: &ZarrReadContext,
+    x: u64,
+    y: u64,
+    width: u64,
+    height: u64,
+    buffer: &mut [u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Create array subset for the region
+    let subset = ArraySubset::new_with_ranges(&[
+        y..(y + height),
+        x..(x + width),
+        0..ctx.bands,
+    ]);
+    
+    // Retrieve the data
+    let data = ctx.array.retrieve_array_subset(&subset)?;
+    
+    // Copy to output buffer
+    let bytes = data.into_fixed()?;
+    buffer[..bytes.len()].copy_from_slice(&bytes);
+    
+    Ok(())
+}

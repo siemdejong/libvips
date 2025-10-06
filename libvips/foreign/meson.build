@@ -62,6 +62,7 @@ foreign_sources = files(
     'webp2vips.c',
     'webpload.c',
     'webpsave.c',
+    'zarrload.c',
     'zarrsave.c',
 )
 
