@@ -58,6 +58,7 @@ typedef struct _VipsForeignSaveZarr {
 
 	char *filename;
 	gboolean ome_zarr;
+	gboolean pyramid;
 	int chunk_height;
 	int chunk_width;
 	int chunk_bands;
@@ -178,6 +179,9 @@ vips_foreign_save_zarr_build(VipsObject *object)
 	VipsImage *in;
 	
 	int data_type;
+	VipsImage *layer;
+	int level;
+	int num_levels;
 
 	/* Call parent build first to initialize save->ready
 	 */
@@ -205,54 +209,130 @@ vips_foreign_save_zarr_build(VipsObject *object)
 		return -1;
 	}
 
-	/* Initialize the zarr array for streaming writes.
-	 */
-	zarr->zarr_handle = vips_zarr_init_array(
-		zarr->filename,
-		in->Xsize,
-		in->Ysize,
-		in->Bands,
-		data_type,
-		zarr->ome_zarr,
-		zarr->chunk_height,
-		zarr->chunk_width,
-		zarr->chunk_bands,
-		zarr->shard_height,
-		zarr->shard_width,
-		zarr->shard_bands,
-		zarr->compression,
-		zarr->gzip_level,
-		zarr->zstd_level,
-		zarr->blosc_clevel,
-		zarr->blosc_shuffle,
-		zarr->blosc_typesize,
-		zarr->blosc_blocksize
-	);
-	
-	if (!zarr->zarr_handle) {
-		vips_error("zarrsave", "%s", "failed to initialize zarr array");
-		return -1;
-	}
+	/* Pyramid implies ome_zarr */
+	if (zarr->pyramid)
+		zarr->ome_zarr = TRUE;
 
-	/* Stream the image data using vips_sink_disc.
-	 * This processes the image in chunks/regions without loading
-	 * the entire image into memory.
+	/* Build pyramid levels if requested.
 	 */
-	if (vips_sink_disc(in, vips_foreign_save_zarr_block, zarr)) {
-		vips_zarr_finalize(zarr->zarr_handle);
-		zarr->zarr_handle = NULL;
-		return -1;
-	}
+	layer = in;
+	g_object_ref(layer);
+	num_levels = 0;
+	
+	for (level = 0;; level++) {
+		char level_path[256];
+		
+		/* For OME-Zarr (pyramid or not), use numbered paths (0, 1, 2, ...).
+		 * For non-OME-Zarr, store directly at root.
+		 */
+		if (zarr->ome_zarr) {
+			snprintf(level_path, sizeof(level_path), "%s/%d", 
+				zarr->filename, level);
+		} else {
+			/* Non-OME: single level stored at root */
+			snprintf(level_path, sizeof(level_path), "%s", 
+				zarr->filename);
+		}
+		
+		/* Initialize the zarr array for this level.
+		 * For pyramids, we don't want OME metadata on individual levels,
+		 * only on the root group at the end.
+		 */
+		zarr->zarr_handle = vips_zarr_init_array(
+			level_path,
+			layer->Xsize,
+			layer->Ysize,
+			layer->Bands,
+			data_type,
+			FALSE,  /* Don't write OME metadata per level */
+			zarr->chunk_height,
+			zarr->chunk_width,
+			zarr->chunk_bands,
+			zarr->shard_height,
+			zarr->shard_width,
+			zarr->shard_bands,
+			zarr->compression,
+			zarr->gzip_level,
+			zarr->zstd_level,
+			zarr->blosc_clevel,
+			zarr->blosc_shuffle,
+			zarr->blosc_typesize,
+			zarr->blosc_blocksize
+		);
+		
+		if (!zarr->zarr_handle) {
+			vips_error("zarrsave", "%s", "failed to initialize zarr array");
+			g_object_unref(layer);
+			return -1;
+		}
 
-	/* Finalize the zarr array and write metadata.
-	 */
-	if (vips_zarr_finalize(zarr->zarr_handle) < 0) {
-		vips_error("zarrsave", "%s", "failed to finalize zarr array");
+		/* Stream the image data.
+		 */
+		if (vips_sink_disc(layer, vips_foreign_save_zarr_block, zarr)) {
+			vips_zarr_finalize_no_metadata(zarr->zarr_handle);
+			zarr->zarr_handle = NULL;
+			g_object_unref(layer);
+			return -1;
+		}
+
+		/* Finalize the zarr array without OME metadata (will write it once at the end).
+		 */
+		if (vips_zarr_finalize_no_metadata(zarr->zarr_handle) < 0) {
+			vips_error("zarrsave", "%s", "failed to finalize zarr array");
+			zarr->zarr_handle = NULL;
+			g_object_unref(layer);
+			return -1;
+		}
+		
 		zarr->zarr_handle = NULL;
-		return -1;
+		num_levels++;
+
+		/* If not pyramid, we're done after first level.
+		 */
+		if (!zarr->pyramid)
+			break;
+
+		/* Stop if image is small enough (smaller than a single chunk).
+		 */
+		if (layer->Xsize < 256 && layer->Ysize < 256)
+			break;
+
+		/* Create the next pyramid level by downsampling by 2.
+		 */
+		VipsImage *shrunk;
+		if (vips_shrink(layer, &shrunk, 2, 2, NULL)) {
+			g_object_unref(layer);
+			return -1;
+		}
+		
+		g_object_unref(layer);
+		layer = shrunk;
 	}
 	
-	zarr->zarr_handle = NULL;
+	g_object_unref(layer);
+
+	/* Write OME-Zarr metadata for pyramids, or single-level OME metadata.
+	 */
+	if (zarr->ome_zarr) {
+		if (zarr->pyramid) {
+			/* Write pyramid metadata with all levels */
+			if (vips_zarr_write_pyramid_metadata(zarr->filename, 
+					num_levels, in->Xsize, in->Ysize, in->Bands, data_type) < 0) {
+				vips_error("zarrsave", "%s", "failed to write pyramid metadata");
+				return -1;
+			}
+		} else {
+			/* For non-pyramid OME-Zarr, we need to write single-level metadata.
+			 * The metadata was not written during finalize, so we need to do it now.
+			 * We'll use the pyramid function with num_levels=1.
+			 */
+			if (vips_zarr_write_pyramid_metadata(zarr->filename, 
+					1, in->Xsize, in->Ysize, in->Bands, data_type) < 0) {
+				vips_error("zarrsave", "%s", "failed to write OME metadata");
+				return -1;
+			}
+		}
+	}
 
 	return 0;
 }
@@ -308,6 +388,13 @@ vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 		_("Write OME-Zarr (Open Microscopy Environment) compatible metadata"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveZarr, ome_zarr),
+		FALSE);
+
+	VIPS_ARG_BOOL(class, "pyramid", 19,
+		_("Pyramid"),
+		_("Write an image pyramid (OME-Zarr multiscales)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, pyramid),
 		FALSE);
 
 	VIPS_ARG_INT(class, "chunk_height", 21,

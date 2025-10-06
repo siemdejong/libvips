@@ -434,6 +434,71 @@ fn write_ome_zarr_metadata(
     Ok(())
 }
 
+/// Write OME-Zarr pyramid metadata to zarr.json
+fn write_ome_zarr_pyramid_metadata(
+    path: &str,
+    num_levels: u32,
+    width: u64,
+    height: u64,
+    bands: u64,
+    data_type_code: i32,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Generate the OME-Zarr pyramid metadata
+    let ome_metadata = ome_zarr::generate_ome_zarr_pyramid_metadata(
+        num_levels, width, height, bands, data_type_code
+    )?;
+    
+    // Build the path to zarr.json at the root
+    let zarr_json_path = Path::new(path).join("zarr.json");
+    
+    // Check if zarr.json exists at the root
+    let root_metadata = if zarr_json_path.exists() {
+        // Read the existing zarr.json
+        let existing_content = fs::read_to_string(&zarr_json_path)?;
+        let mut metadata: serde_json::Value = serde_json::from_str(&existing_content)?;
+        
+        // Add the OME metadata to attributes.ome
+        if let Some(obj) = metadata.as_object_mut() {
+            if let Some(attrs) = obj.get_mut("attributes") {
+                if let Some(attrs_obj) = attrs.as_object_mut() {
+                    attrs_obj.insert("ome".to_string(), json!({
+                        "version": "0.5",
+                        "multiscales": ome_metadata["multiscales"]
+                    }));
+                }
+            } else {
+                // If no attributes exist, create them
+                obj.insert("attributes".to_string(), json!({
+                    "ome": {
+                        "version": "0.5",
+                        "multiscales": ome_metadata["multiscales"]
+                    }
+                }));
+            }
+        }
+        
+        metadata
+    } else {
+        // Create a new root group with OME metadata
+        json!({
+            "zarr_format": 3,
+            "node_type": "group",
+            "attributes": {
+                "ome": {
+                    "version": "0.5",
+                    "multiscales": ome_metadata["multiscales"]
+                }
+            }
+        })
+    };
+    
+    // Write the metadata
+    let updated_json = serde_json::to_string_pretty(&root_metadata)?;
+    fs::write(&zarr_json_path, updated_json)?;
+    
+    Ok(())
+}
+
 // ===== Streaming API =====
 
 /// Initialize a zarr array for streaming writes
@@ -538,6 +603,47 @@ pub extern "C" fn vips_zarr_finalize(handle: *mut std::ffi::c_void) -> i32 {
     let ctx = unsafe { Box::from_raw(handle as *mut ZarrWriteContext) };
     
     match finalize_zarr_array(*ctx) {
+        Ok(_) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Finalize a zarr array without writing OME metadata (for pyramid levels)
+#[no_mangle]
+pub extern "C" fn vips_zarr_finalize_no_metadata(handle: *mut std::ffi::c_void) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    
+    // Convert handle back to Box and take ownership
+    let ctx = unsafe { Box::from_raw(handle as *mut ZarrWriteContext) };
+    
+    match finalize_zarr_array_no_metadata(*ctx) {
+        Ok(_) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Write OME-Zarr pyramid metadata for multiple resolution levels
+#[no_mangle]
+pub extern "C" fn vips_zarr_write_pyramid_metadata(
+    path: *const c_char,
+    num_levels: u32,
+    width: u64,
+    height: u64,
+    bands: u64,
+    data_type: i32,
+) -> i32 {
+    if path.is_null() {
+        return -1;
+    }
+    
+    let path_str = match unsafe { CStr::from_ptr(path).to_str() } {
+        Ok(s) => s,
+        Err(_) => return -1,
+    };
+    
+    match write_ome_zarr_pyramid_metadata(path_str, num_levels, width, height, bands, data_type) {
         Ok(_) => 0,
         Err(_) => -1,
     }
@@ -764,5 +870,14 @@ fn finalize_zarr_array(
         write_ome_zarr_metadata(&ctx.path, ctx.width, ctx.height, ctx.bands, ctx.data_type_code)?;
     }
     
+    Ok(())
+}
+
+/// Finalize the zarr array without writing OME metadata (for pyramid levels)
+fn finalize_zarr_array_no_metadata(
+    ctx: ZarrWriteContext,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Drop the array to ensure all writes are flushed
+    drop(ctx.array);
     Ok(())
 }

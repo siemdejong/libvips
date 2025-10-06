@@ -114,6 +114,38 @@ int vips_zarr_write_region(
  */
 int vips_zarr_finalize(VipsZarrHandle handle);
 
+/* Finalize the zarr array without writing OME metadata (for pyramid levels)
+ * 
+ * Arguments:
+ *   handle - Handle returned by vips_zarr_init_array
+ * 
+ * Returns:
+ *   0 on success, -1 on error
+ */
+int vips_zarr_finalize_no_metadata(VipsZarrHandle handle);
+
+/* Write OME-Zarr pyramid metadata after all pyramid levels are written
+ * 
+ * Arguments:
+ *   path - Path to the zarr store root directory
+ *   num_levels - Number of pyramid levels
+ *   width - Width of the full resolution level (level 0)
+ *   height - Height of the full resolution level (level 0)
+ *   bands - Number of bands/channels
+ *   data_type - Data type code (same as vips_zarr_init_array)
+ * 
+ * Returns:
+ *   0 on success, -1 on error
+ */
+int vips_zarr_write_pyramid_metadata(
+    const char *path,
+    uint32_t num_levels,
+    uint64_t width,
+    uint64_t height,
+    uint64_t bands,
+    int32_t data_type
+);
+
 #ifdef __cplusplus
 }
 #endif
