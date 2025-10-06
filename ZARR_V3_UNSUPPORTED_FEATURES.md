@@ -78,13 +78,10 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 ### Bytes → Bytes Codecs
 
 #### Supported
-- ✅ `gzip` - Gzip compression (level 5, hardcoded)
-- ✅ `zstd` - Zstd compression (level 3 with checksum)
+- ✅ `gzip` - Gzip compression with configurable level (1-9, default 5)
+- ✅ `zstd` - Zstd compression with configurable level (1-22, default 3)
 
 #### Not Supported
-- ❌ Configurable gzip compression level (currently fixed to level 5)
-- ❌ Configurable zstd compression level (currently fixed to level 3)
-- ❌ Configurable zstd checksum (currently always enabled)
 - ❌ `blosc` - Blosc compression
 - ❌ `crc32c` - CRC32C checksum
 - ❌ Extension codecs (custom compression/encoding)
@@ -358,6 +355,9 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 **Supported Features:**
 - Core data types: 12 of 13 (92%)
 - Codecs: 3 of 10+ (30%)
+  - gzip with configurable levels (1-9)
+  - zstd with configurable levels (1-22)
+  - bytes codec
 - Operations: Write-only (0% read support)
 - Metadata: Basic required fields only
 
@@ -382,9 +382,9 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 
 1. **Write-Only**: The current implementation is write-only. Reading Zarr arrays back into libvips is not supported.
 
-2. **Fixed Configuration**: Many codec and encoding options are hardcoded (e.g., gzip level 5, little-endian, `/` separator).
+2. **Configurable Compression**: Gzip (levels 1-9, default 5) and zstd (levels 1-22, default 3) compression levels are now fully configurable via `--gzip-level` and `--zstd-level` parameters.
 
-3. **Limited Data Types**: Only 5 of 13 core data types are supported, matching common libvips image formats.
+3. **Limited Data Types**: 12 of 13 core data types are supported, matching common libvips image formats. Bool, float16, and raw bytes are not supported.
 
 4. **No Groups**: Only single root-level arrays are supported. No hierarchical structures.
 
@@ -402,7 +402,7 @@ Based on the spec analysis, high-priority additions would be:
 
 1. **Read Operations** - Essential for round-trip support
 2. **Boolean and float16 types** - Complete data type coverage
-3. **Additional Codecs** - blosc for better compression, configurable compression levels
+3. **Additional Codecs** - blosc, lz4, crc32c for checksums
 4. **Multi-Resolution Pyramids** - Full OME-NGFF support
 5. **Groups** - Hierarchical organization
 6. **Cloud Storage** - S3/HTTP support

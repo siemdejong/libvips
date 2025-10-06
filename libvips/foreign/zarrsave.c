@@ -65,6 +65,8 @@ typedef struct _VipsForeignSaveZarr {
 	int shard_width;
 	int shard_bands;
 	VipsForeignZarrCompression compression;
+	int gzip_level;
+	int zstd_level;
 } VipsForeignSaveZarr;
 
 typedef VipsForeignSaveClass VipsForeignSaveZarrClass;
@@ -171,7 +173,9 @@ vips_foreign_save_zarr_build(VipsObject *object)
 			zarr->shard_height,
 			zarr->shard_width,
 			zarr->shard_bands,
-			zarr->compression) < 0) {
+			zarr->compression,
+			zarr->gzip_level,
+			zarr->zstd_level) < 0) {
 		vips_error("zarrsave", "%s", "failed to write zarr array");
 		return -1;
 	}
@@ -266,6 +270,20 @@ vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 		G_STRUCT_OFFSET(VipsForeignSaveZarr, compression),
 		VIPS_TYPE_FOREIGN_ZARR_COMPRESSION,
 		VIPS_FOREIGN_ZARR_COMPRESSION_GZIP);
+
+	VIPS_ARG_INT(class, "gzip_level", 28,
+		_("Gzip level"),
+		_("Gzip compression level (1-9, 0 for default)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, gzip_level),
+		0, 9, 0);
+
+	VIPS_ARG_INT(class, "zstd_level", 29,
+		_("Zstd level"),
+		_("Zstd compression level (1-22, 0 for default)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, zstd_level),
+		0, 22, 0);
 }
 
 static void
@@ -289,6 +307,8 @@ vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
  * * @shard_width: %gint, shard width (0 for no sharding)
  * * @shard_bands: %gint, shard bands (0 for no sharding)
  * * @compression: #VipsForeignZarrCompression, compression codec
+ * * @gzip_level: %gint, gzip compression level (1-9, 0 for default of 5)
+ * * @zstd_level: %gint, zstd compression level (1-22, 0 for default of 3)
  *
  * Write @in to a Zarr v3 format array at @filename.
  *
@@ -302,6 +322,16 @@ vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
  * Use @compression to select the compression codec:
  * - GZIP (default): Good compression with wide compatibility
  * - ZSTD: Better compression ratios and faster decompression
+ *
+ * Use @gzip_level to control gzip compression (1-9, default 5):
+ * - Lower values (1-3): Faster compression, larger files
+ * - Medium values (4-6): Balanced speed and compression
+ * - Higher values (7-9): Better compression, slower speed
+ *
+ * Use @zstd_level to control zstd compression (1-22, default 3):
+ * - Lower values (1-3): Very fast compression
+ * - Medium values (4-9): Good balance of speed and compression
+ * - Higher values (10-22): Maximum compression, slower speed
  *
  * Chunking divides the array into regular blocks for efficient access:
  * - If @chunk_height, @chunk_width, and @chunk_bands are specified (all > 0),

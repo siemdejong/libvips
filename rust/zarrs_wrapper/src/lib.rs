@@ -65,6 +65,8 @@ pub extern "C" fn vips_zarr_test() -> i32 {
 /// * `shard_width` - Shard width (0 for no sharding)
 /// * `shard_bands` - Shard bands (0 for no sharding)
 /// * `compression` - Compression codec: 0=gzip, 1=zstd
+/// * `gzip_level` - Gzip compression level (1-9, 0 for default of 5)
+/// * `zstd_level` - Zstd compression level (1-22, 0 for default of 3)
 /// 
 /// # Returns
 /// * 0 on success, -1 on error
@@ -85,6 +87,8 @@ pub extern "C" fn vips_zarr_write_array(
     shard_width: i32,
     shard_bands: i32,
     compression: i32,
+    gzip_level: i32,
+    zstd_level: i32,
 ) -> i32 {
     // Convert C string to Rust string
     let path_str = unsafe {
@@ -116,7 +120,7 @@ pub extern "C" fn vips_zarr_write_array(
     };
     
     // Call the actual implementation
-    match write_zarr_array(path_str, width, height, bands, data_type, data_slice, use_ome_zarr, chunk_shape, shard_shape, compression) {
+    match write_zarr_array(path_str, width, height, bands, data_type, data_slice, use_ome_zarr, chunk_shape, shard_shape, compression, gzip_level, zstd_level) {
         Ok(_) => 0,
         Err(_) => -1,
     }
@@ -134,6 +138,8 @@ fn write_zarr_array(
     chunk_shape: Option<(u64, u64, u64)>,
     shard_shape: Option<(u64, u64, u64)>,
     compression: i32,
+    gzip_level: i32,
+    zstd_level: i32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Map data type code to zarrs DataType
     let data_type = match data_type_code {
@@ -208,9 +214,18 @@ fn write_zarr_array(
     
     // Create compression codec based on the compression parameter
     // 0 = gzip (default), 1 = zstd
+    // Use provided levels, or defaults if level is 0
     let compression_codec: Arc<dyn zarrs::array::codec::BytesToBytesCodecTraits> = match compression {
-        1 => Arc::new(ZstdCodec::new(3, true)), // zstd with level 3 and checksum
-        _ => Arc::new(GzipCodec::new(5)?), // gzip with level 5 (default)
+        1 => {
+            // zstd: level 1-22, default 3, always use checksum
+            let level = if zstd_level > 0 { zstd_level } else { 3 };
+            Arc::new(ZstdCodec::new(level, true))
+        },
+        _ => {
+            // gzip: level 1-9, default 5
+            let level = if gzip_level > 0 { gzip_level as u32 } else { 5 };
+            Arc::new(GzipCodec::new(level)?)
+        },
     };
     
     // Build array with optional sharding
