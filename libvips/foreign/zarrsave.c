@@ -10,7 +10,14 @@
 
 	VIPS is free software; you can redistribute it and/or modify
 	it under the terms of the GNU Lesser General Public License as published by
-	the Free Software Foundation; either version 2 of the License, or
+	the Free Software Foundation; either version 2 of the Lic * Chunking + sharding: Chunks grouped in shards (e.g., 128×128×3 chunks 
+ *   in 256×256×3 shards → 4 chunks per shard file)
+ *
+ * Supported data types are: uint8, uint16, uint32, uint64*, int8, int16, 
+ * int32, int64*, float32, float64, complex64, complex128.
+ * (*uint64 and int64 supported via FFI but not as native VIPS formats)
+ *
+ * If @ome_zarr is TRUE, the output will conform to the OME-Zarror
 	(at your option) any later version.
 
 	This program is distributed in the hope that it will be useful,
@@ -67,6 +74,8 @@ G_DEFINE_TYPE(VipsForeignSaveZarr, vips_foreign_save_zarr,
 
 /* Map VipsImage format to zarr data type code
  * 0=uint8, 1=uint16, 2=uint32, 3=float32, 4=float64
+ * 5=int8, 6=int16, 7=int32, 8=uint64, 9=int64
+ * 10=complex64, 11=complex128
  */
 static int
 vips_format_to_zarr_type(VipsBandFormat format)
@@ -82,6 +91,18 @@ vips_format_to_zarr_type(VipsBandFormat format)
 		return 3;
 	case VIPS_FORMAT_DOUBLE:
 		return 4;
+	case VIPS_FORMAT_CHAR:
+		return 5;
+	case VIPS_FORMAT_SHORT:
+		return 6;
+	case VIPS_FORMAT_INT:
+		return 7;
+	/* Note: VIPS doesn't have native uint64, so we can't map it directly */
+	/* Note: VIPS doesn't have native int64, so we can't map it directly */
+	case VIPS_FORMAT_COMPLEX:
+		return 10;
+	case VIPS_FORMAT_DPCOMPLEX:
+		return 11;
 	default:
 		return -1;
 	}

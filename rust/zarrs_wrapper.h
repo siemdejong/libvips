@@ -33,7 +33,10 @@ int vips_zarr_test(void);
  *   width - Width of the image
  *   height - Height of the image  
  *   bands - Number of bands/channels
- *   data_type - Data type: 0=uint8, 1=uint16, 2=uint32, 3=float32, 4=float64
+ *   data_type - Data type:
+ *       0=uint8, 1=uint16, 2=uint32, 3=float32, 4=float64
+ *       5=int8, 6=int16, 7=int32, 8=uint64, 9=int64
+ *       10=complex64, 11=complex128
  *   data - Pointer to the image data
  *   data_len - Length of data in bytes
  *   ome_zarr - If 1, write OME-Zarr compatible metadata

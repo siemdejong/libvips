@@ -14,23 +14,23 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 - ✅ `uint8` - 8-bit unsigned integer
 - ✅ `uint16` - 16-bit unsigned integer  
 - ✅ `uint32` - 32-bit unsigned integer
+- ✅ `uint64` - 64-bit unsigned integer (via type code 8)*
+- ✅ `int8` - 8-bit signed integer
+- ✅ `int16` - 16-bit signed integer
+- ✅ `int32` - 32-bit signed integer
+- ✅ `int64` - 64-bit signed integer (via type code 9)*
 - ✅ `float32` - 32-bit floating point
 - ✅ `float64` - 64-bit floating point
+- ✅ `complex64` - Complex number (64-bit: 2×32-bit float)
+- ✅ `complex128` - Complex number (128-bit: 2×64-bit float)
+
+*Note: uint64 and int64 are supported in the Rust/Zarr layer but VIPS doesn't have native 64-bit integer image formats, so these can only be used via direct FFI calls, not through standard VIPS operations.
 
 ### Not Supported
 - ❌ `bool` - Boolean (1 byte)
-- ❌ `int8` - 8-bit signed integer
-- ❌ `int16` - 16-bit signed integer
-- ❌ `int32` - 32-bit signed integer
-- ❌ `int64` - 64-bit signed integer
-- ❌ `uint64` - 64-bit unsigned integer
 - ❌ `float16` - 16-bit floating point
-- ❌ `complex64` - Complex number (64-bit: 2×32-bit float)
-- ❌ `complex128` - Complex number (128-bit: 2×64-bit float)
 - ❌ `r*` - Raw/opaque bytes (e.g., `r8`, `r16`, `r24`)
 - ❌ Extension data types (custom/user-defined types)
-
----
 
 ## 2. Chunk Grids
 
@@ -356,7 +356,7 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 ## Summary Statistics
 
 **Supported Features:**
-- Core data types: 5 of 13 (38%)
+- Core data types: 12 of 13 (92%)
 - Codecs: 3 of 10+ (30%)
 - Operations: Write-only (0% read support)
 - Metadata: Basic required fields only
@@ -367,14 +367,14 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 - ❌ Storage transformers (0%)
 - ❌ Extensions system (0%)
 - ❌ Most codecs (70%)
-- ❌ Most data types (62%)
+- ❌ Few data types (8%)
 - ❌ Advanced OME-NGFF features (70%)
 
 **Implementation Status:**
 - **Basic Write**: ✅ Functional
 - **Basic Read**: ❌ Not implemented
 - **Advanced Features**: ❌ Mostly not implemented
-- **Spec Compliance**: ~20-25% of full v3.1 specification
+- **Spec Compliance**: ~35-40% of full v3.1 specification
 
 ---
 
@@ -401,7 +401,7 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 Based on the spec analysis, high-priority additions would be:
 
 1. **Read Operations** - Essential for round-trip support
-2. **Additional Data Types** - int8, int16, int32 for scientific data
+2. **Boolean and float16 types** - Complete data type coverage
 3. **Additional Codecs** - blosc for better compression, configurable compression levels
 4. **Multi-Resolution Pyramids** - Full OME-NGFF support
 5. **Groups** - Hierarchical organization

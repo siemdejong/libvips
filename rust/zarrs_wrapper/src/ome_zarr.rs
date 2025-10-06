@@ -95,6 +95,13 @@ pub fn generate_ome_zarr_metadata(
         2 => "uint32",
         3 => "float32",
         4 => "float64",
+        5 => "int8",
+        6 => "int16",
+        7 => "int32",
+        8 => "uint64",
+        9 => "int64",
+        10 => "complex64",
+        11 => "complex128",
         _ => return Err("Unsupported data type".into()),
     };
     

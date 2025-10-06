@@ -14,6 +14,7 @@ use zarrs::array::codec::{GzipCodec, ZstdCodec};
 use zarrs::array_subset::ArraySubset;
 use zarrs_filesystem::FilesystemStore;
 use serde_json::json;
+use num_complex::{Complex32, Complex64};
 
 /// Check if zarrs is available and working
 /// Returns 1 if zarrs is available, 0 otherwise
@@ -141,6 +142,13 @@ fn write_zarr_array(
         2 => DataType::UInt32,
         3 => DataType::Float32,
         4 => DataType::Float64,
+        5 => DataType::Int8,
+        6 => DataType::Int16,
+        7 => DataType::Int32,
+        8 => DataType::UInt64,
+        9 => DataType::Int64,
+        10 => DataType::Complex64,
+        11 => DataType::Complex128,
         _ => return Err("Unsupported data type".into()),
     };
     
@@ -184,6 +192,13 @@ fn write_zarr_array(
         2 => FillValue::from(0u32),
         3 => FillValue::from(0.0f32),
         4 => FillValue::from(0.0f64),
+        5 => FillValue::from(0i8),
+        6 => FillValue::from(0i16),
+        7 => FillValue::from(0i32),
+        8 => FillValue::from(0u64),
+        9 => FillValue::from(0i64),
+        10 => FillValue::from(Complex32::new(0.0, 0.0)),
+        11 => FillValue::from(Complex64::new(0.0, 0.0)),
         _ => return Err("Unsupported data type".into()),
     };
     
