@@ -1099,18 +1099,51 @@ typedef enum {
 } VipsForeignHeifEncoder;
 
 /**
+ * VipsForeignZarrBloscShuffle:
+ * @VIPS_FOREIGN_ZARR_BLOSC_NOSHUFFLE: no shuffling
+ * @VIPS_FOREIGN_ZARR_BLOSC_SHUFFLE: byte-wise shuffling
+ * @VIPS_FOREIGN_ZARR_BLOSC_BITSHUFFLE: bit-wise shuffling
+ *
+ * The shuffle mode for blosc compression.
+ *
+ * Shuffling rearranges data before compression to improve compression ratios
+ * for typed numeric data. SHUFFLE performs byte-wise shuffling, BITSHUFFLE
+ * performs bit-wise shuffling. Use NOSHUFFLE to disable shuffling.
+ */
+typedef enum {
+	VIPS_FOREIGN_ZARR_BLOSC_NOSHUFFLE,
+	VIPS_FOREIGN_ZARR_BLOSC_SHUFFLE,
+	VIPS_FOREIGN_ZARR_BLOSC_BITSHUFFLE,
+	VIPS_FOREIGN_ZARR_BLOSC_SHUFFLE_LAST	/*< skip >*/
+} VipsForeignZarrBloscShuffle;
+
+/**
  * VipsForeignZarrCompression:
  * @VIPS_FOREIGN_ZARR_COMPRESSION_GZIP: gzip compression
  * @VIPS_FOREIGN_ZARR_COMPRESSION_ZSTD: zstd compression
+ * @VIPS_FOREIGN_ZARR_COMPRESSION_BLOSC_LZ4: blosc with lz4 algorithm
+ * @VIPS_FOREIGN_ZARR_COMPRESSION_BLOSC_LZ4HC: blosc with lz4hc algorithm
+ * @VIPS_FOREIGN_ZARR_COMPRESSION_BLOSC_BLOSCLZ: blosc with blosclz algorithm
+ * @VIPS_FOREIGN_ZARR_COMPRESSION_BLOSC_ZSTD: blosc with zstd algorithm
+ * @VIPS_FOREIGN_ZARR_COMPRESSION_BLOSC_SNAPPY: blosc with snappy algorithm
+ * @VIPS_FOREIGN_ZARR_COMPRESSION_BLOSC_ZLIB: blosc with zlib algorithm
  *
  * The compression types supported by the zarr writer.
  *
  * GZIP is the default and provides good compression with wide compatibility.
  * ZSTD typically offers better compression ratios and faster decompression.
+ * BLOSC codecs provide meta-compression with block-wise compression and optional
+ * byte/bit shuffling for improved compression of typed data.
  */
 typedef enum {
 	VIPS_FOREIGN_ZARR_COMPRESSION_GZIP,
 	VIPS_FOREIGN_ZARR_COMPRESSION_ZSTD,
+	VIPS_FOREIGN_ZARR_COMPRESSION_BLOSC_LZ4,
+	VIPS_FOREIGN_ZARR_COMPRESSION_BLOSC_LZ4HC,
+	VIPS_FOREIGN_ZARR_COMPRESSION_BLOSC_BLOSCLZ,
+	VIPS_FOREIGN_ZARR_COMPRESSION_BLOSC_ZSTD,
+	VIPS_FOREIGN_ZARR_COMPRESSION_BLOSC_SNAPPY,
+	VIPS_FOREIGN_ZARR_COMPRESSION_BLOSC_ZLIB,
 	VIPS_FOREIGN_ZARR_COMPRESSION_LAST	/*< skip >*/
 } VipsForeignZarrCompression;
 

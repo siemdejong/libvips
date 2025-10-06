@@ -46,9 +46,13 @@ int vips_zarr_test(void);
  *   shard_height - Shard height (0 for no sharding)
  *   shard_width - Shard width (0 for no sharding)
  *   shard_bands - Shard bands (0 for no sharding)
- *   compression - Compression codec: 0=gzip, 1=zstd
+ *   compression - Compression codec: 0=gzip, 1=zstd, 2-7=blosc variants
  *   gzip_level - Gzip compression level (1-9, 0 for default of 5)
  *   zstd_level - Zstd compression level (1-22, 0 for default of 3)
+ *   blosc_clevel - Blosc compression level (0-9, 0 for default of 5)
+ *   blosc_shuffle - Blosc shuffle mode (0=noshuffle, 1=shuffle, 2=bitshuffle)
+ *   blosc_typesize - Blosc typesize (0 for automatic based on data type)
+ *   blosc_blocksize - Blosc blocksize in bytes (0 for automatic)
  * 
  * Returns:
  *   0 on success, -1 on error
@@ -70,7 +74,11 @@ int vips_zarr_write_array(
     int shard_bands,
     int compression,
     int gzip_level,
-    int zstd_level
+    int zstd_level,
+    int blosc_clevel,
+    int blosc_shuffle,
+    int blosc_typesize,
+    int blosc_blocksize
 );
 
 #ifdef __cplusplus

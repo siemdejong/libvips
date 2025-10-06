@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::fs;
 
 use zarrs::array::{ArrayBuilder, DataType, FillValue, ChunkShape};
-use zarrs::array::codec::{GzipCodec, ZstdCodec};
+use zarrs::array::codec::{GzipCodec, ZstdCodec, BloscCodec};
 use zarrs::array_subset::ArraySubset;
 use zarrs_filesystem::FilesystemStore;
 use serde_json::json;
@@ -64,9 +64,13 @@ pub extern "C" fn vips_zarr_test() -> i32 {
 /// * `shard_height` - Shard height (0 for no sharding)
 /// * `shard_width` - Shard width (0 for no sharding)
 /// * `shard_bands` - Shard bands (0 for no sharding)
-/// * `compression` - Compression codec: 0=gzip, 1=zstd
+/// * `compression` - Compression codec: 0=gzip, 1=zstd, 2-7=blosc variants
 /// * `gzip_level` - Gzip compression level (1-9, 0 for default of 5)
 /// * `zstd_level` - Zstd compression level (1-22, 0 for default of 3)
+/// * `blosc_clevel` - Blosc compression level (0-9)
+/// * `blosc_shuffle` - Blosc shuffle mode (0=noshuffle, 1=shuffle, 2=bitshuffle)
+/// * `blosc_typesize` - Blosc typesize (0 for automatic)
+/// * `blosc_blocksize` - Blosc blocksize (0 for automatic)
 /// 
 /// # Returns
 /// * 0 on success, -1 on error
@@ -89,6 +93,10 @@ pub extern "C" fn vips_zarr_write_array(
     compression: i32,
     gzip_level: i32,
     zstd_level: i32,
+    blosc_clevel: i32,
+    blosc_shuffle: i32,
+    blosc_typesize: i32,
+    blosc_blocksize: i32,
 ) -> i32 {
     // Convert C string to Rust string
     let path_str = unsafe {
@@ -120,7 +128,11 @@ pub extern "C" fn vips_zarr_write_array(
     };
     
     // Call the actual implementation
-    match write_zarr_array(path_str, width, height, bands, data_type, data_slice, use_ome_zarr, chunk_shape, shard_shape, compression, gzip_level, zstd_level) {
+    match write_zarr_array(
+        path_str, width, height, bands, data_type, data_slice, use_ome_zarr, 
+        chunk_shape, shard_shape, compression, gzip_level, zstd_level,
+        blosc_clevel, blosc_shuffle, blosc_typesize, blosc_blocksize
+    ) {
         Ok(_) => 0,
         Err(_) => -1,
     }
@@ -140,6 +152,10 @@ fn write_zarr_array(
     compression: i32,
     gzip_level: i32,
     zstd_level: i32,
+    blosc_clevel: i32,
+    blosc_shuffle: i32,
+    blosc_typesize: i32,
+    blosc_blocksize: i32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Map data type code to zarrs DataType
     let data_type = match data_type_code {
@@ -212,14 +228,71 @@ fn write_zarr_array(
     // OME-Zarr stores the array in a subdirectory (typically "0")
     let array_path = if ome_zarr { "/0" } else { "/" };
     
+    // Determine typesize for blosc (bytes per element)
+    let element_size = match data_type_code {
+        0 | 5 => 1,      // uint8, int8
+        1 | 6 => 2,      // uint16, int16
+        2 | 3 | 7 => 4,  // uint32, float32, int32
+        4 | 8 | 9 => 8,  // float64, uint64, int64
+        10 => 8,         // complex64 (2 x float32)
+        11 => 16,        // complex128 (2 x float64)
+        _ => 1,
+    };
+    
     // Create compression codec based on the compression parameter
-    // 0 = gzip (default), 1 = zstd
-    // Use provided levels, or defaults if level is 0
+    // 0 = gzip, 1 = zstd, 2-7 = blosc variants
     let compression_codec: Arc<dyn zarrs::array::codec::BytesToBytesCodecTraits> = match compression {
         1 => {
             // zstd: level 1-22, default 3, always use checksum
             let level = if zstd_level > 0 { zstd_level } else { 3 };
             Arc::new(ZstdCodec::new(level, true))
+        },
+        2..=7 => {
+            // blosc variants: 2=lz4, 3=lz4hc, 4=blosclz, 5=zstd, 6=snappy, 7=zlib
+            use zarrs::array::codec::{BloscCompressor, BloscCompressionLevel, BloscShuffleMode};
+            
+            let compressor = match compression {
+                2 => BloscCompressor::LZ4,
+                3 => BloscCompressor::LZ4HC,
+                4 => BloscCompressor::BloscLZ,
+                5 => BloscCompressor::Zstd,
+                6 => BloscCompressor::Snappy,
+                7 => BloscCompressor::Zlib,
+                _ => BloscCompressor::LZ4, // fallback
+            };
+            
+            // Blosc compression level (0-9, default 5)
+            let clevel = if blosc_clevel > 0 { 
+                BloscCompressionLevel::try_from(blosc_clevel as u8).unwrap_or(BloscCompressionLevel::try_from(5).unwrap())
+            } else { 
+                BloscCompressionLevel::try_from(5).unwrap()
+            };
+            
+            // Blosc shuffle mode: 0=noshuffle, 1=shuffle, 2=bitshuffle
+            let shuffle = match blosc_shuffle {
+                0 => BloscShuffleMode::NoShuffle,
+                2 => BloscShuffleMode::BitShuffle,
+                _ => BloscShuffleMode::Shuffle, // 1 or default
+            };
+            
+            // Blosc typesize (0 for automatic based on data type)
+            let typesize = if blosc_typesize > 0 { 
+                Some(blosc_typesize as usize)
+            } else if shuffle != BloscShuffleMode::NoShuffle {
+                Some(element_size)
+            } else {
+                None
+            };
+            
+            // Blosc blocksize (0 for automatic)
+            let blocksize = if blosc_blocksize > 0 { 
+                Some(blosc_blocksize as usize)
+            } else { 
+                None
+            };
+            
+            // Note: BloscCodec::new signature is (cname, clevel, blocksize, shuffle_mode, typesize)
+            Arc::new(BloscCodec::new(compressor, clevel, blocksize, shuffle, typesize)?)
         },
         _ => {
             // gzip: level 1-9, default 5

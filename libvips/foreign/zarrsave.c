@@ -67,6 +67,10 @@ typedef struct _VipsForeignSaveZarr {
 	VipsForeignZarrCompression compression;
 	int gzip_level;
 	int zstd_level;
+	int blosc_clevel;
+	VipsForeignZarrBloscShuffle blosc_shuffle;
+	int blosc_typesize;
+	int blosc_blocksize;
 } VipsForeignSaveZarr;
 
 typedef VipsForeignSaveClass VipsForeignSaveZarrClass;
@@ -175,7 +179,11 @@ vips_foreign_save_zarr_build(VipsObject *object)
 			zarr->shard_bands,
 			zarr->compression,
 			zarr->gzip_level,
-			zarr->zstd_level) < 0) {
+			zarr->zstd_level,
+			zarr->blosc_clevel,
+			zarr->blosc_shuffle,
+			zarr->blosc_typesize,
+			zarr->blosc_blocksize) < 0) {
 		vips_error("zarrsave", "%s", "failed to write zarr array");
 		return -1;
 	}
@@ -265,7 +273,7 @@ vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 
 	VIPS_ARG_ENUM(class, "compression", 27,
 		_("Compression"),
-		_("Compression codec (gzip or zstd)"),
+		_("Compression codec (gzip, zstd, or blosc variants)"),
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveZarr, compression),
 		VIPS_TYPE_FOREIGN_ZARR_COMPRESSION,
@@ -284,6 +292,35 @@ vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveZarr, zstd_level),
 		0, 22, 0);
+
+	VIPS_ARG_INT(class, "blosc_clevel", 30,
+		_("Blosc compression level"),
+		_("Blosc compression level (0-9, 0 for default)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, blosc_clevel),
+		0, 9, 0);
+
+	VIPS_ARG_ENUM(class, "blosc_shuffle", 31,
+		_("Blosc shuffle"),
+		_("Blosc shuffle mode"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, blosc_shuffle),
+		VIPS_TYPE_FOREIGN_ZARR_BLOSC_SHUFFLE,
+		VIPS_FOREIGN_ZARR_BLOSC_SHUFFLE);
+
+	VIPS_ARG_INT(class, "blosc_typesize", 32,
+		_("Blosc typesize"),
+		_("Blosc typesize (0 for automatic based on data type)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, blosc_typesize),
+		0, 32, 0);
+
+	VIPS_ARG_INT(class, "blosc_blocksize", 33,
+		_("Blosc blocksize"),
+		_("Blosc blocksize in bytes (0 for automatic)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, blosc_blocksize),
+		0, INT_MAX, 0);
 }
 
 static void
