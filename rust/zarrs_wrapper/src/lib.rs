@@ -9,12 +9,23 @@ use std::path::Path;
 use std::sync::Arc;
 use std::fs;
 
-use zarrs::array::{ArrayBuilder, DataType, FillValue, ChunkShape};
+use zarrs::array::{Array, ArrayBuilder, DataType, FillValue, ChunkShape};
 use zarrs::array::codec::{GzipCodec, ZstdCodec, BloscCodec};
 use zarrs::array_subset::ArraySubset;
 use zarrs_filesystem::FilesystemStore;
 use serde_json::json;
 use num_complex::{Complex32, Complex64};
+
+/// Context for streaming writes to a zarr array
+struct ZarrWriteContext {
+    array: Array<FilesystemStore>,
+    width: u64,
+    height: u64,
+    bands: u64,
+    data_type_code: i32,
+    ome_zarr: bool,
+    path: String,
+}
 
 /// Check if zarrs is available and working
 /// Returns 1 if zarrs is available, 0 otherwise
@@ -419,6 +430,339 @@ fn write_ome_zarr_metadata(
     // Write back the modified zarr.json
     let updated_json = serde_json::to_string_pretty(&root_metadata)?;
     fs::write(&zarr_json_path, updated_json)?;
+    
+    Ok(())
+}
+
+// ===== Streaming API =====
+
+/// Initialize a zarr array for streaming writes
+#[no_mangle]
+pub extern "C" fn vips_zarr_init_array(
+    path: *const c_char,
+    width: u64,
+    height: u64,
+    bands: u64,
+    data_type: i32,
+    ome_zarr: i32,
+    chunk_height: i32,
+    chunk_width: i32,
+    chunk_bands: i32,
+    shard_height: i32,
+    shard_width: i32,
+    shard_bands: i32,
+    compression: i32,
+    gzip_level: i32,
+    zstd_level: i32,
+    blosc_clevel: i32,
+    blosc_shuffle: i32,
+    blosc_typesize: i32,
+    blosc_blocksize: i32,
+) -> *mut std::ffi::c_void {
+    // Convert C string to Rust string
+    let path_str = unsafe {
+        match CStr::from_ptr(path).to_str() {
+            Ok(s) => s.to_string(),
+            Err(_) => return std::ptr::null_mut(),
+        }
+    };
+    
+    let use_ome_zarr = ome_zarr != 0;
+    
+    // Convert chunk parameters
+    let chunk_shape = if chunk_height > 0 && chunk_width > 0 && chunk_bands > 0 {
+        Some((chunk_height as u64, chunk_width as u64, chunk_bands as u64))
+    } else {
+        None
+    };
+    
+    // Convert shard parameters
+    let shard_shape = if shard_height > 0 && shard_width > 0 && shard_bands > 0 {
+        Some((shard_height as u64, shard_width as u64, shard_bands as u64))
+    } else {
+        None
+    };
+    
+    // Initialize the array
+    match init_zarr_array(
+        &path_str, width, height, bands, data_type, use_ome_zarr,
+        chunk_shape, shard_shape, compression, gzip_level, zstd_level,
+        blosc_clevel, blosc_shuffle, blosc_typesize, blosc_blocksize
+    ) {
+        Ok(ctx) => {
+            // Box the context and convert to opaque handle
+            let boxed = Box::new(ctx);
+            let handle = Box::into_raw(boxed) as *mut std::ffi::c_void;
+            handle
+        },
+        Err(_) => std::ptr::null_mut(),
+    }
+}
+
+/// Write a region of data to the zarr array
+#[no_mangle]
+pub extern "C" fn vips_zarr_write_region(
+    handle: *mut std::ffi::c_void,
+    x: u64,
+    y: u64,
+    width: u64,
+    height: u64,
+    data: *const u8,
+    data_len: usize,
+) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    
+    // Convert handle back to reference
+    let ctx = unsafe { &mut *(handle as *mut ZarrWriteContext) };
+    
+    let data_slice = unsafe {
+        std::slice::from_raw_parts(data, data_len)
+    };
+    
+    match write_region(ctx, x, y, width, height, data_slice) {
+        Ok(_) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Finalize the zarr array and free resources
+#[no_mangle]
+pub extern "C" fn vips_zarr_finalize(handle: *mut std::ffi::c_void) -> i32 {
+    if handle.is_null() {
+        return -1;
+    }
+    
+    // Convert handle back to Box and take ownership
+    let ctx = unsafe { Box::from_raw(handle as *mut ZarrWriteContext) };
+    
+    match finalize_zarr_array(*ctx) {
+        Ok(_) => 0,
+        Err(_) => -1,
+    }
+}
+
+/// Internal function to initialize a zarr array
+fn init_zarr_array(
+    path: &str,
+    width: u64,
+    height: u64,
+    bands: u64,
+    data_type_code: i32,
+    ome_zarr: bool,
+    chunk_shape: Option<(u64, u64, u64)>,
+    shard_shape: Option<(u64, u64, u64)>,
+    compression: i32,
+    gzip_level: i32,
+    zstd_level: i32,
+    blosc_clevel: i32,
+    blosc_shuffle: i32,
+    blosc_typesize: i32,
+    blosc_blocksize: i32,
+) -> Result<ZarrWriteContext, Box<dyn std::error::Error>> {
+    // Map data type code to zarrs DataType
+    let data_type = match data_type_code {
+        0 => DataType::UInt8,
+        1 => DataType::UInt16,
+        2 => DataType::UInt32,
+        3 => DataType::Float32,
+        4 => DataType::Float64,
+        5 => DataType::Int8,
+        6 => DataType::Int16,
+        7 => DataType::Int32,
+        8 => DataType::UInt64,
+        9 => DataType::Int64,
+        10 => DataType::Complex64,
+        11 => DataType::Complex128,
+        _ => return Err("Unsupported data type".into()),
+    };
+    
+    // Create filesystem store
+    let store = Arc::new(FilesystemStore::new(Path::new(path))?);
+    
+    // Array shape: [height, width, bands]
+    let array_shape = vec![height, width, bands];
+    
+    // Determine chunk shape
+    let inner_chunk_dims = chunk_shape.unwrap_or((height, width, bands));
+    let outer_chunk_dims = shard_shape.unwrap_or(inner_chunk_dims);
+    let outer_chunk_shape = vec![outer_chunk_dims.0, outer_chunk_dims.1, outer_chunk_dims.2];
+    
+    // Fill value
+    let fill_value = match data_type_code {
+        0 => FillValue::from(0u8),
+        1 => FillValue::from(0u16),
+        2 => FillValue::from(0u32),
+        3 => FillValue::from(0.0f32),
+        4 => FillValue::from(0.0f64),
+        5 => FillValue::from(0i8),
+        6 => FillValue::from(0i16),
+        7 => FillValue::from(0i32),
+        8 => FillValue::from(0u64),
+        9 => FillValue::from(0i64),
+        10 => FillValue::from(Complex32::new(0.0, 0.0)),
+        11 => FillValue::from(Complex64::new(0.0, 0.0)),
+        _ => return Err("Unsupported data type".into()),
+    };
+    
+    let array_path = if ome_zarr { "/0" } else { "/" };
+    
+    // Determine typesize for blosc
+    let element_size = match data_type_code {
+        0 | 5 => 1,
+        1 | 6 => 2,
+        2 | 3 | 7 => 4,
+        4 | 8 | 9 => 8,
+        10 => 8,
+        11 => 16,
+        _ => 1,
+    };
+    
+    // Create compression codec
+    let compression_codec: Arc<dyn zarrs::array::codec::BytesToBytesCodecTraits> = match compression {
+        1 => {
+            let level = if zstd_level > 0 { zstd_level } else { 3 };
+            Arc::new(ZstdCodec::new(level, true))
+        },
+        2..=7 => {
+            use zarrs::array::codec::{BloscCompressor, BloscCompressionLevel, BloscShuffleMode};
+            
+            let compressor = match compression {
+                2 => BloscCompressor::LZ4,
+                3 => BloscCompressor::LZ4HC,
+                4 => BloscCompressor::BloscLZ,
+                5 => BloscCompressor::Zstd,
+                6 => BloscCompressor::Snappy,
+                7 => BloscCompressor::Zlib,
+                _ => BloscCompressor::LZ4,
+            };
+            
+            let clevel = if blosc_clevel > 0 {
+                BloscCompressionLevel::try_from(blosc_clevel as u8).unwrap_or(BloscCompressionLevel::try_from(5).unwrap())
+            } else {
+                BloscCompressionLevel::try_from(5).unwrap()
+            };
+            
+            let shuffle = match blosc_shuffle {
+                0 => BloscShuffleMode::NoShuffle,
+                2 => BloscShuffleMode::BitShuffle,
+                _ => BloscShuffleMode::Shuffle,
+            };
+            
+            let typesize = if blosc_typesize > 0 {
+                Some(blosc_typesize as usize)
+            } else if shuffle != BloscShuffleMode::NoShuffle {
+                Some(element_size)
+            } else {
+                None
+            };
+            
+            let blocksize = if blosc_blocksize > 0 {
+                Some(blosc_blocksize as usize)
+            } else {
+                None
+            };
+            
+            Arc::new(BloscCodec::new(compressor, clevel, blocksize, shuffle, typesize)?)
+        },
+        _ => {
+            let level = if gzip_level > 0 { gzip_level as u32 } else { 5 };
+            Arc::new(GzipCodec::new(level)?)
+        },
+    };
+    
+    // Build array with optional sharding
+    let array = if shard_shape.is_some() {
+        use zarrs::array::codec::ShardingCodecBuilder;
+        
+        let inner_chunk_shape: ChunkShape = vec![inner_chunk_dims.0, inner_chunk_dims.1, inner_chunk_dims.2]
+            .try_into()
+            .map_err(|e| format!("Invalid inner chunk shape: {:?}", e))?;
+        
+        let sharding_codec = ShardingCodecBuilder::new(inner_chunk_shape)
+            .bytes_to_bytes_codecs(vec![compression_codec])
+            .build();
+        
+        ArrayBuilder::new(
+            array_shape.clone(),
+            outer_chunk_shape.as_slice(),
+            data_type.clone(),
+            fill_value,
+        )
+        .array_to_bytes_codec(Arc::new(sharding_codec))
+        .build(store.clone(), array_path)?
+    } else {
+        ArrayBuilder::new(
+            array_shape.clone(),
+            outer_chunk_shape.as_slice(),
+            data_type.clone(),
+            fill_value,
+        )
+        .bytes_to_bytes_codecs(vec![compression_codec])
+        .build(store.clone(), array_path)?
+    };
+    
+    // Store array metadata
+    array.store_metadata()?;
+    
+    // Create group metadata for OME-Zarr
+    if ome_zarr {
+        let zarr_json_path = Path::new(path).join("zarr.json");
+        if !zarr_json_path.exists() {
+            let group_metadata = json!({
+                "zarr_format": 3,
+                "node_type": "group",
+                "attributes": {}
+            });
+            fs::write(&zarr_json_path, serde_json::to_string_pretty(&group_metadata)?)?;
+        }
+    }
+    
+    Ok(ZarrWriteContext {
+        array,
+        width,
+        height,
+        bands,
+        data_type_code,
+        ome_zarr,
+        path: path.to_string(),
+    })
+}
+
+/// Write a region of data to the zarr array
+fn write_region(
+    ctx: &mut ZarrWriteContext,
+    x: u64,
+    y: u64,
+    width: u64,
+    height: u64,
+    data: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Create subset for this region: [y..y+height, x..x+width, 0..bands]
+    let subset = ArraySubset::new_with_ranges(&[
+        y..(y + height),
+        x..(x + width),
+        0..ctx.bands,
+    ]);
+    
+    // Write the data
+    ctx.array.store_array_subset(&subset, data)?;
+    
+    Ok(())
+}
+
+/// Finalize the zarr array
+fn finalize_zarr_array(
+    ctx: ZarrWriteContext,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Drop the array to ensure all writes are flushed
+    drop(ctx.array);
+    
+    // Write OME-Zarr metadata if needed
+    if ctx.ome_zarr {
+        write_ome_zarr_metadata(&ctx.path, ctx.width, ctx.height, ctx.bands, ctx.data_type_code)?;
+    }
     
     Ok(())
 }

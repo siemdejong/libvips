@@ -26,7 +26,10 @@ const char *vips_zarr_version(void);
  */
 int vips_zarr_test(void);
 
-/* Create a new Zarr v3 array and write data to it
+/* Opaque handle to zarr array writer */
+typedef void *VipsZarrHandle;
+
+/* Initialize a zarr array for streaming writes
  * 
  * Arguments:
  *   path - Path to the zarr store directory (null-terminated C string)
@@ -37,8 +40,6 @@ int vips_zarr_test(void);
  *       0=uint8, 1=uint16, 2=uint32, 3=float32, 4=float64
  *       5=int8, 6=int16, 7=int32, 8=uint64, 9=int64
  *       10=complex64, 11=complex128
- *   data - Pointer to the image data
- *   data_len - Length of data in bytes
  *   ome_zarr - If 1, write OME-Zarr compatible metadata
  *   chunk_height - Chunk height (0 for full image height)
  *   chunk_width - Chunk width (0 for full image width)
@@ -55,16 +56,14 @@ int vips_zarr_test(void);
  *   blosc_blocksize - Blosc blocksize in bytes (0 for automatic)
  * 
  * Returns:
- *   0 on success, -1 on error
+ *   Handle on success, NULL on error
  */
-int vips_zarr_write_array(
+VipsZarrHandle vips_zarr_init_array(
     const char *path,
     uint64_t width,
     uint64_t height,
     uint64_t bands,
     int32_t data_type,
-    const uint8_t *data,
-    size_t data_len,
     int ome_zarr,
     int chunk_height,
     int chunk_width,
@@ -80,6 +79,40 @@ int vips_zarr_write_array(
     int blosc_typesize,
     int blosc_blocksize
 );
+
+/* Write a region of data to the zarr array
+ * 
+ * Arguments:
+ *   handle - Handle returned by vips_zarr_init_array
+ *   x - X offset of the region (left edge)
+ *   y - Y offset of the region (top edge)
+ *   width - Width of the region
+ *   height - Height of the region
+ *   data - Pointer to the region data (interleaved bands)
+ *   data_len - Length of data in bytes
+ * 
+ * Returns:
+ *   0 on success, -1 on error
+ */
+int vips_zarr_write_region(
+    VipsZarrHandle handle,
+    uint64_t x,
+    uint64_t y,
+    uint64_t width,
+    uint64_t height,
+    const uint8_t *data,
+    size_t data_len
+);
+
+/* Finalize the zarr array and free resources
+ * 
+ * Arguments:
+ *   handle - Handle returned by vips_zarr_init_array
+ * 
+ * Returns:
+ *   0 on success, -1 on error
+ */
+int vips_zarr_finalize(VipsZarrHandle handle);
 
 #ifdef __cplusplus
 }

@@ -71,6 +71,9 @@ typedef struct _VipsForeignSaveZarr {
 	VipsForeignZarrBloscShuffle blosc_shuffle;
 	int blosc_typesize;
 	int blosc_blocksize;
+	
+	/* Streaming write context */
+	VipsZarrHandle zarr_handle;
 } VipsForeignSaveZarr;
 
 typedef VipsForeignSaveClass VipsForeignSaveZarrClass;
@@ -114,6 +117,59 @@ vips_format_to_zarr_type(VipsBandFormat format)
 	}
 }
 
+/* Called for each strip/region of the image during saving.
+ * Write the region data to the zarr array via the streaming API.
+ */
+static int
+vips_foreign_save_zarr_block(VipsRegion *region, VipsRect *area, void *a)
+{
+	VipsForeignSaveZarr *zarr = (VipsForeignSaveZarr *) a;
+	
+	/* Get pointer to the start of this region's data */
+	VipsPel *p = VIPS_REGION_ADDR(region, area->left, area->top);
+	
+	/* Calculate the size of this region in bytes */
+	size_t line_size = area->width * VIPS_IMAGE_SIZEOF_PEL(region->im);
+	size_t region_size = line_size * area->height;
+	
+	/* For non-contiguous regions, we need to copy to a contiguous buffer */
+	VipsPel *data;
+	gboolean need_free = FALSE;
+	
+	if (VIPS_REGION_LSKIP(region) == line_size) {
+		/* Data is contiguous, use directly */
+		data = p;
+	}
+	else {
+		/* Data is not contiguous, need to copy */
+		data = g_malloc(region_size);
+		need_free = TRUE;
+		
+		VipsPel *q = data;
+		for (int y = 0; y < area->height; y++) {
+			VipsPel *row = VIPS_REGION_ADDR(region, area->left, area->top + y);
+			memcpy(q, row, line_size);
+			q += line_size;
+		}
+	}
+	
+	/* Write the region to zarr */
+	int result = vips_zarr_write_region(
+		zarr->zarr_handle,
+		area->left,
+		area->top,
+		area->width,
+		area->height,
+		data,
+		region_size
+	);
+	
+	if (need_free)
+		g_free(data);
+	
+	return result;
+}
+
 static int
 vips_foreign_save_zarr_build(VipsObject *object)
 {
@@ -122,8 +178,6 @@ vips_foreign_save_zarr_build(VipsObject *object)
 	VipsImage *in;
 	
 	int data_type;
-	size_t data_len;
-	void *data;
 
 	/* Call parent build first to initialize save->ready
 	 */
@@ -151,42 +205,54 @@ vips_foreign_save_zarr_build(VipsObject *object)
 		return -1;
 	}
 
-	/* Get the image data.
-	 * We need the whole image in memory.
+	/* Initialize the zarr array for streaming writes.
 	 */
-	if (vips_image_wio_input(in))
-		return -1;
-
-	data = VIPS_IMAGE_ADDR(in, 0, 0);
-	data_len = VIPS_IMAGE_SIZEOF_IMAGE(in);
-
-	/* Write the zarr array.
-	 */
-	if (vips_zarr_write_array(
-			zarr->filename,
-			in->Xsize,
-			in->Ysize,
-			in->Bands,
-			data_type,
-			data,
-			data_len,
-			zarr->ome_zarr,
-			zarr->chunk_height,
-			zarr->chunk_width,
-			zarr->chunk_bands,
-			zarr->shard_height,
-			zarr->shard_width,
-			zarr->shard_bands,
-			zarr->compression,
-			zarr->gzip_level,
-			zarr->zstd_level,
-			zarr->blosc_clevel,
-			zarr->blosc_shuffle,
-			zarr->blosc_typesize,
-			zarr->blosc_blocksize) < 0) {
-		vips_error("zarrsave", "%s", "failed to write zarr array");
+	zarr->zarr_handle = vips_zarr_init_array(
+		zarr->filename,
+		in->Xsize,
+		in->Ysize,
+		in->Bands,
+		data_type,
+		zarr->ome_zarr,
+		zarr->chunk_height,
+		zarr->chunk_width,
+		zarr->chunk_bands,
+		zarr->shard_height,
+		zarr->shard_width,
+		zarr->shard_bands,
+		zarr->compression,
+		zarr->gzip_level,
+		zarr->zstd_level,
+		zarr->blosc_clevel,
+		zarr->blosc_shuffle,
+		zarr->blosc_typesize,
+		zarr->blosc_blocksize
+	);
+	
+	if (!zarr->zarr_handle) {
+		vips_error("zarrsave", "%s", "failed to initialize zarr array");
 		return -1;
 	}
+
+	/* Stream the image data using vips_sink_disc.
+	 * This processes the image in chunks/regions without loading
+	 * the entire image into memory.
+	 */
+	if (vips_sink_disc(in, vips_foreign_save_zarr_block, zarr)) {
+		vips_zarr_finalize(zarr->zarr_handle);
+		zarr->zarr_handle = NULL;
+		return -1;
+	}
+
+	/* Finalize the zarr array and write metadata.
+	 */
+	if (vips_zarr_finalize(zarr->zarr_handle) < 0) {
+		vips_error("zarrsave", "%s", "failed to finalize zarr array");
+		zarr->zarr_handle = NULL;
+		return -1;
+	}
+	
+	zarr->zarr_handle = NULL;
 
 	return 0;
 }
@@ -197,6 +263,20 @@ static const char *vips_foreign_save_zarr_suffs[] = {
 };
 
 static void
+vips_foreign_save_zarr_dispose(GObject *gobject)
+{
+	VipsForeignSaveZarr *zarr = (VipsForeignSaveZarr *) gobject;
+
+	/* Clean up zarr handle if still open */
+	if (zarr->zarr_handle) {
+		vips_zarr_finalize(zarr->zarr_handle);
+		zarr->zarr_handle = NULL;
+	}
+
+	G_OBJECT_CLASS(vips_foreign_save_zarr_parent_class)->dispose(gobject);
+}
+
+static void
 vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 {
 	GObjectClass *gobject_class = G_OBJECT_CLASS(class);
@@ -204,6 +284,7 @@ vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 	VipsForeignClass *foreign_class = (VipsForeignClass *) class;
 	VipsForeignSaveClass *save_class = (VipsForeignSaveClass *) class;
 
+	gobject_class->dispose = vips_foreign_save_zarr_dispose;
 	gobject_class->set_property = vips_object_set_property;
 	gobject_class->get_property = vips_object_get_property;
 
@@ -326,6 +407,7 @@ vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 static void
 vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
 {
+	zarr->zarr_handle = NULL;
 }
 
 /**
