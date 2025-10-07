@@ -75,6 +75,7 @@ typedef struct _VipsForeignSaveZarr {
 	int blosc_typesize;
 	int blosc_blocksize;
 	VipsForeignZarrEndian endian;
+	char *dimension_order;
 	
 	/* Streaming write context */
 	VipsZarrHandle zarr_handle;
@@ -263,7 +264,8 @@ vips_foreign_save_zarr_build(VipsObject *object)
 			zarr->blosc_shuffle,
 			zarr->blosc_typesize,
 			zarr->blosc_blocksize,
-			zarr->endian
+			zarr->endian,
+			zarr->dimension_order
 		);
 		
 		if (!zarr->zarr_handle) {
@@ -519,6 +521,13 @@ vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveZarr, time),
 		0, INT_MAX, 0);
+
+	VIPS_ARG_STRING(class, "dimension_order", 37,
+		_("Dimension order"),
+		_("Output dimension order (e.g., 'cyx', 'yxc', 'tzyxc')"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, dimension_order),
+		NULL);
 }
 
 static void

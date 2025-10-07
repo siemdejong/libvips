@@ -61,10 +61,10 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 ### Array → Array Codecs
 
 #### Supported
-- ✅ None currently (transpose codec not implemented)
+- ✅ `transpose` - Array dimension reordering
 
 #### Not Supported
-- ❌ `transpose` - Array dimension reordering
+- ❌ Extension array→array codecs
 
 ### Array → Bytes Codecs
 
@@ -93,7 +93,7 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 - ✅ Codec configuration parameters (compression levels, blosc options, endianness)
 
 #### Not Supported
-- ❌ Multiple array→array codecs
+- ❌ Multiple array→array codecs (currently supports at most one transpose codec)
 - ❌ Custom codec chains beyond the current pattern
 - ❌ `must_understand=false` for optional codecs
 - ❌ Partial decoding for codecs (except via sharding)
@@ -356,7 +356,8 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 
 **Supported Features:**
 - Core data types: 12 of 13 (92%)
-- Codecs: 3 of 10+ (30%)
+- Codecs: 4 of 10+ (40%)
+  - transpose (dimension reordering)
   - gzip with configurable levels (1-9)
   - zstd with configurable levels (1-22)
   - bytes codec
@@ -368,7 +369,7 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 - ❌ Groups and hierarchies (0%)
 - ❌ Storage transformers (0%)
 - ❌ Extensions system (0%)
-- ❌ Most codecs (70%)
+- ❌ Most codecs (60%)
 - ❌ Few data types (8%)
 - ❌ Advanced OME-NGFF features (70%)
 
@@ -376,7 +377,7 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 - **Basic Write**: ✅ Functional
 - **Basic Read**: ❌ Not implemented
 - **Advanced Features**: ❌ Mostly not implemented
-- **Spec Compliance**: ~35-40% of full v3.1 specification
+- **Spec Compliance**: ~40-45% of full v3.1 specification
 
 ---
 
@@ -386,15 +387,17 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 
 2. **Configurable Compression**: Gzip (levels 1-9, default 5) and zstd (levels 1-22, default 3) compression levels are now fully configurable via `--gzip-level` and `--zstd-level` parameters.
 
-3. **Limited Data Types**: 12 of 13 core data types are supported, matching common libvips image formats. Bool, float16, and raw bytes are not supported.
+3. **Transpose Codec**: The transpose codec is implemented at the Rust/FFI layer and supports dimension reordering for both 3D and 5D arrays. It validates that the order parameter is a valid permutation of dimension indices. Currently exposed via Rust API only; C API integration is optional.
 
-4. **No Groups**: Only single root-level arrays are supported. No hierarchical structures.
+4. **Limited Data Types**: 12 of 13 core data types are supported, matching common libvips image formats. Bool, float16, and raw bytes are not supported.
 
-5. **No Extensions**: The extension system is not implemented, limiting expandability.
+5. **No Groups**: Only single root-level arrays are supported. No hierarchical structures.
 
-6. **Single Resolution**: OME-NGFF support is limited to single-resolution arrays, not multi-resolution pyramids.
+6. **No Extensions**: The extension system is not implemented, limiting expandability.
 
-7. **Filesystem Only**: Only local filesystem storage is supported. Cloud storage (S3, GCS, Azure) requires external tools.
+7. **Single Resolution**: OME-NGFF support is limited to single-resolution arrays, not multi-resolution pyramids.
+
+8. **Filesystem Only**: Only local filesystem storage is supported. Cloud storage (S3, GCS, Azure) requires external tools.
 
 ---
 
@@ -405,9 +408,10 @@ Based on the spec analysis, high-priority additions would be:
 1. **Read Operations** - Essential for round-trip support
 2. **Boolean and float16 types** - Complete data type coverage
 3. **Additional Codecs** - blosc, lz4, crc32c for checksums
-4. **Multi-Resolution Pyramids** - Full OME-NGFF support
-5. **Groups** - Hierarchical organization
-6. **Cloud Storage** - S3/HTTP support
+4. **Transpose C API Integration** - Expose transpose codec through vips command-line tool (optional)
+5. **Multi-Resolution Pyramids** - Full OME-NGFF support
+6. **Groups** - Hierarchical organization
+7. **Cloud Storage** - S3/HTTP support
 
 ---
 

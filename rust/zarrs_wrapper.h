@@ -26,6 +26,62 @@ const char *vips_zarr_version(void);
  */
 int vips_zarr_test(void);
 
+/* Create a new Zarr v3 array and write data to it (non-streaming)
+ * 
+ * Arguments:
+ *   path - Path to the zarr store directory
+ *   width - Width of the image
+ *   height - Height of the image
+ *   bands - Number of bands/channels
+ *   data_type - Data type code (see vips_zarr_init_array)
+ *   data - Pointer to the image data
+ *   data_len - Length of data in bytes
+ *   ome_zarr - If 1, write OME-Zarr compatible metadata
+ *   chunk_height - Chunk height (0 for full image height)
+ *   chunk_width - Chunk width (0 for full image width)
+ *   chunk_bands - Chunk bands (0 for all bands)
+ *   shard_height - Shard height (0 for no sharding)
+ *   shard_width - Shard width (0 for no sharding)
+ *   shard_bands - Shard bands (0 for no sharding)
+ *   compression - Compression codec
+ *   gzip_level - Gzip compression level
+ *   zstd_level - Zstd compression level
+ *   blosc_clevel - Blosc compression level
+ *   blosc_shuffle - Blosc shuffle mode
+ *   blosc_typesize - Blosc typesize
+ *   blosc_blocksize - Blosc blocksize
+ *   endian - Endianness
+ *   dimension_order - Dimension order string (e.g., "cyx", "yxc"), NULL for default "yxc"
+ * 
+ * Returns:
+ *   0 on success, -1 on error
+ */
+int vips_zarr_write_array(
+    const char *path,
+    uint64_t width,
+    uint64_t height,
+    uint64_t bands,
+    int32_t data_type,
+    const uint8_t *data,
+    size_t data_len,
+    int ome_zarr,
+    int chunk_height,
+    int chunk_width,
+    int chunk_bands,
+    int shard_height,
+    int shard_width,
+    int shard_bands,
+    int compression,
+    int gzip_level,
+    int zstd_level,
+    int blosc_clevel,
+    int blosc_shuffle,
+    int blosc_typesize,
+    int blosc_blocksize,
+    int endian,
+    const char *dimension_order
+);
+
 /* Opaque handle to zarr array writer */
 typedef void *VipsZarrHandle;
 
@@ -57,6 +113,8 @@ typedef void *VipsZarrHandle;
  *   blosc_typesize - Blosc typesize (0 for automatic based on data type)
  *   blosc_blocksize - Blosc blocksize in bytes (0 for automatic)
  *   endian - Endianness (0=little, 1=big, 2=native)
+ *   transpose_order - Pointer to array of dimension order (NULL for no transpose)
+ *   transpose_len - Length of transpose_order array (0 for no transpose)
  * 
  * Returns:
  *   Handle on success, NULL on error
@@ -83,7 +141,8 @@ VipsZarrHandle vips_zarr_init_array(
     int blosc_shuffle,
     int blosc_typesize,
     int blosc_blocksize,
-    int endian
+    int endian,
+    const char *dimension_order
 );
 
 /* Write a region of data to the zarr array

@@ -8,9 +8,10 @@ use std::os::raw::c_char;
 use std::path::Path;
 use std::sync::Arc;
 use std::fs;
+use std::collections::{HashMap, HashSet};
 
 use zarrs::array::{Array, ArrayBuilder, DataType, FillValue, ChunkShape};
-use zarrs::array::codec::{GzipCodec, ZstdCodec, BloscCodec, BytesCodec};
+use zarrs::array::codec::{GzipCodec, ZstdCodec, BloscCodec, BytesCodec, TransposeCodec, TransposeOrder};
 use zarrs::array_subset::ArraySubset;
 use zarrs::metadata::Endianness;
 use zarrs_filesystem::FilesystemStore;
@@ -28,6 +29,85 @@ struct ZarrWriteContext {
     data_type_code: i32,
     ome_zarr: bool,
     path: String,
+}
+
+/// Parse a dimension order string (e.g., "cyx", "yxc", "tzyxc") and convert to transpose indices
+/// 
+/// # Arguments
+/// * `order_str` - Dimension order string (e.g., "cyx" for bands-height-width)
+/// * `is_5d` - Whether the array is 5D (with time and depth) or 3D
+/// 
+/// # Returns
+/// * Vector of indices representing the transpose order, or error if invalid
+/// 
+/// # Examples
+/// * For 3D arrays (y, x, c):
+///   - "yxc" → [0, 1, 2] (no transpose, identity)
+///   - "cyx" → [2, 0, 1] (bands first)
+///   - "xyc" → [1, 0, 2] (swap x and y)
+/// 
+/// * For 5D arrays (t, z, y, x, c):
+///   - "tzyxc" → [0, 1, 2, 3, 4] (no transpose, identity)
+///   - "ctzyx" → [4, 0, 1, 2, 3] (bands first)
+///   - "yxctz" → [2, 3, 4, 0, 1] (y, x, c, then t, z)
+fn parse_dimension_order(order_str: &str, is_5d: bool) -> Result<Vec<usize>, String> {
+    let order_lower = order_str.to_lowercase();
+    
+    // Define the canonical dimension order for each case
+    let (canonical, dim_count) = if is_5d {
+        ("tzyxc", 5)
+    } else {
+        ("yxc", 3)
+    };
+    
+    // Validate length
+    if order_lower.len() != dim_count {
+        return Err(format!(
+            "Dimension order '{}' must have {} characters for {}D arrays",
+            order_str, dim_count, if is_5d { "5" } else { "3" }
+        ));
+    }
+    
+    // Build a map from dimension character to canonical index
+    let mut dim_to_index = HashMap::new();
+    for (i, c) in canonical.chars().enumerate() {
+        dim_to_index.insert(c, i);
+    }
+    
+    // Parse the order string and build transpose indices
+    let mut transpose_order = Vec::with_capacity(dim_count);
+    let mut seen = HashSet::new();
+    
+    for c in order_lower.chars() {
+        // Check if this is a valid dimension character
+        let index = dim_to_index.get(&c).ok_or_else(|| {
+            format!(
+                "Invalid dimension character '{}' in '{}'. Valid characters for {}D: {}",
+                c, order_str, if is_5d { "5" } else { "3" }, canonical
+            )
+        })?;
+        
+        // Check for duplicates
+        if seen.contains(&c) {
+            return Err(format!(
+                "Duplicate dimension character '{}' in '{}'",
+                c, order_str
+            ));
+        }
+        seen.insert(c);
+        
+        transpose_order.push(*index);
+    }
+    
+    // Verify we got all dimensions
+    if transpose_order.len() != dim_count {
+        return Err(format!(
+            "Dimension order '{}' is incomplete. Expected {} dimensions: {}",
+            order_str, dim_count, canonical
+        ));
+    }
+    
+    Ok(transpose_order)
 }
 
 /// Check if zarrs is available and working
@@ -85,6 +165,7 @@ pub extern "C" fn vips_zarr_test() -> i32 {
 /// * `blosc_shuffle` - Blosc shuffle mode (0=noshuffle, 1=shuffle, 2=bitshuffle)
 /// * `blosc_typesize` - Blosc typesize (0 for automatic)
 /// * `blosc_blocksize` - Blosc blocksize (0 for automatic)
+/// * `dimension_order` - Dimension order string (e.g., "cyx", "yxc"), NULL for default "yxc"
 /// 
 /// # Returns
 /// * 0 on success, -1 on error
@@ -112,6 +193,7 @@ pub extern "C" fn vips_zarr_write_array(
     blosc_typesize: i32,
     blosc_blocksize: i32,
     endian: i32,
+    dimension_order: *const c_char,
 ) -> i32 {
     // Convert C string to Rust string
     let path_str = unsafe {
@@ -142,11 +224,48 @@ pub extern "C" fn vips_zarr_write_array(
         None
     };
     
+    // Parse dimension_order string if provided
+    let transpose_order = if !dimension_order.is_null() {
+        let dim_order_str = unsafe {
+            match CStr::from_ptr(dimension_order).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    eprintln!("Error: invalid UTF-8 in dimension_order");
+                    return -1;
+                }
+            }
+        };
+        
+        // Skip if empty string
+        if dim_order_str.is_empty() {
+            None
+        } else {
+            // For non-streaming write, we only have 3D arrays (height, width, bands)
+            match parse_dimension_order(dim_order_str, false) {
+                Ok(order) => {
+                    // Check if it's the identity permutation [0, 1, 2] - if so, no transpose needed
+                    if order == vec![0, 1, 2] {
+                        None
+                    } else {
+                        Some(order)
+                    }
+                },
+                Err(e) => {
+                    eprintln!("Error parsing dimension order: {}", e);
+                    return -1;
+                }
+            }
+        }
+    } else {
+        None
+    };
+    
     // Call the actual implementation
     match write_zarr_array(
         path_str, width, height, bands, data_type, data_slice, use_ome_zarr, 
         chunk_shape, shard_shape, compression, gzip_level, zstd_level,
-        blosc_clevel, blosc_shuffle, blosc_typesize, blosc_blocksize, endian
+        blosc_clevel, blosc_shuffle, blosc_typesize, blosc_blocksize, endian,
+        transpose_order
     ) {
         Ok(_) => 0,
         Err(_) => -1,
@@ -172,6 +291,7 @@ fn write_zarr_array(
     blosc_typesize: i32,
     blosc_blocksize: i32,
     endian: i32,
+    transpose_order: Option<Vec<usize>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Map data type code to zarrs DataType
     let data_type = match data_type_code {
@@ -340,6 +460,35 @@ fn write_zarr_array(
     // - The ShardingCodec's inner_chunk_shape defines the logical chunks within shards
     // - Without sharding, chunks are stored as individual files
     // - With sharding, multiple chunks are grouped into shard files
+    
+    // Create transpose codec if requested
+    // Transpose is an array->array codec and must be applied first
+    let transpose_codec: Option<Arc<dyn zarrs::array::codec::ArrayToArrayCodecTraits>> = 
+        if let Some(ref order) = transpose_order {
+            // Validate that the transpose order length matches array dimensions
+            let dimensions = array_shape.len();
+            if order.len() != dimensions {
+                return Err(format!(
+                    "Transpose order must have {} elements for {}D array, got {}",
+                    dimensions, dimensions, order.len()
+                ).into());
+            }
+            // Check that it's a valid permutation (contains all indices 0..dimensions exactly once)
+            let mut sorted = order.clone();
+            sorted.sort_unstable();
+            let expected: Vec<usize> = (0..dimensions).collect();
+            if sorted != expected {
+                return Err(format!(
+                    "Transpose order must be a permutation of 0..{}, got {:?}",
+                    dimensions, order
+                ).into());
+            }
+            let transpose_order = TransposeOrder::new(order)?;
+            Some(Arc::new(TransposeCodec::new(transpose_order)))
+        } else {
+            None
+        };
+    
     let array = if shard_shape.is_some() {
         // With sharding: use ShardingCodec as array_to_bytes codec
         // Outer chunks (shards) contain multiple inner chunks
@@ -355,51 +504,44 @@ fn write_zarr_array(
             .build();
         
         // Build the ArrayBuilder with codecs in the proper order:
-        // 1. BytesCodec (array-to-bytes) for endianness (optional)
-        // 2. ShardingCodec (array-to-bytes) for grouping chunks
-        if let Some(bc) = bytes_codec.clone() {
-            ArrayBuilder::new(
-                array_shape.clone(),
-                outer_chunk_shape.as_slice(),
-                data_type.clone(),
-                fill_value,
-            )
-            .array_to_bytes_codec(bc)
-            .array_to_bytes_codec(Arc::new(sharding_codec))
-            .build(store.clone(), array_path)?
-        } else {
-            ArrayBuilder::new(
-                array_shape.clone(),
-                outer_chunk_shape.as_slice(),
-                data_type.clone(),
-                fill_value,
-            )
-            .array_to_bytes_codec(Arc::new(sharding_codec))
-            .build(store.clone(), array_path)?
+        // 1. TransposeCodec (array-to-array) for dimension reordering (optional)
+        // 2. BytesCodec (array-to-bytes) for endianness (optional)
+        // 3. ShardingCodec (array-to-bytes) for grouping chunks
+        let mut builder = ArrayBuilder::new(
+            array_shape.clone(),
+            outer_chunk_shape.as_slice(),
+            data_type.clone(),
+            fill_value,
+        );
+        
+        if let Some(tc) = transpose_codec.clone() {
+            builder.array_to_array_codecs(vec![tc]);
         }
+        if let Some(bc) = bytes_codec.clone() {
+            builder.array_to_bytes_codec(bc);
+        }
+        builder.array_to_bytes_codec(Arc::new(sharding_codec));
+        
+        builder.build(store.clone(), array_path)?
     } else {
         // Without sharding: chunks are stored as individual files with selected compression
-        // Codec chain: BytesCodec (array-to-bytes) → compression (bytes-to-bytes)
-        if let Some(bc) = bytes_codec {
-            ArrayBuilder::new(
-                array_shape.clone(),
-                outer_chunk_shape.as_slice(),
-                data_type.clone(),
-                fill_value,
-            )
-            .array_to_bytes_codec(bc)
-            .bytes_to_bytes_codecs(vec![compression_codec])
-            .build(store.clone(), array_path)?
-        } else {
-            ArrayBuilder::new(
-                array_shape.clone(),
-                outer_chunk_shape.as_slice(),
-                data_type.clone(),
-                fill_value,
-            )
-            .bytes_to_bytes_codecs(vec![compression_codec])
-            .build(store.clone(), array_path)?
+        // Codec chain: TransposeCodec (array-to-array) → BytesCodec (array-to-bytes) → compression (bytes-to-bytes)
+        let mut builder = ArrayBuilder::new(
+            array_shape.clone(),
+            outer_chunk_shape.as_slice(),
+            data_type.clone(),
+            fill_value,
+        );
+        
+        if let Some(tc) = transpose_codec {
+            builder.array_to_array_codecs(vec![tc]);
         }
+        if let Some(bc) = bytes_codec {
+            builder.array_to_bytes_codec(bc);
+        }
+        builder.bytes_to_bytes_codecs(vec![compression_codec]);
+        
+        builder.build(store.clone(), array_path)?
     };
     
     // Store array metadata
@@ -582,6 +724,7 @@ pub extern "C" fn vips_zarr_init_array(
     blosc_typesize: i32,
     blosc_blocksize: i32,
     endian: i32,
+    dimension_order: *const c_char,
 ) -> *mut std::ffi::c_void {
     // Convert C string to Rust string
     let path_str = unsafe {
@@ -607,11 +750,51 @@ pub extern "C" fn vips_zarr_init_array(
         None
     };
     
+    // Parse dimension_order string if provided
+    let transpose_order = if !dimension_order.is_null() {
+        let dim_order_str = unsafe {
+            match CStr::from_ptr(dimension_order).to_str() {
+                Ok(s) => s,
+                Err(_) => {
+                    eprintln!("Error: invalid UTF-8 in dimension_order");
+                    return std::ptr::null_mut();
+                }
+            }
+        };
+        
+        // Skip if empty string
+        if dim_order_str.is_empty() {
+            None
+        } else {
+            // Check if we're using 5D based on depth/time parameters
+            let is_5d = time > 0 || depth > 0;
+            
+            match parse_dimension_order(dim_order_str, is_5d) {
+                Ok(order) => {
+                    // Check if it's the identity permutation - if so, no transpose needed
+                    let identity: Vec<usize> = (0..order.len()).collect();
+                    if order == identity {
+                        None
+                    } else {
+                        Some(order)
+                    }
+                },
+                Err(e) => {
+                    eprintln!("Error parsing dimension order: {}", e);
+                    return std::ptr::null_mut();
+                }
+            }
+        }
+    } else {
+        None
+    };
+    
     // Initialize the array
     match init_zarr_array(
         &path_str, width, height, bands, depth, time, data_type, use_ome_zarr,
         chunk_shape, shard_shape, compression, gzip_level, zstd_level,
-        blosc_clevel, blosc_shuffle, blosc_typesize, blosc_blocksize, endian
+        blosc_clevel, blosc_shuffle, blosc_typesize, blosc_blocksize, endian,
+        transpose_order
     ) {
         Ok(ctx) => {
             // Box the context and convert to opaque handle
@@ -730,6 +913,7 @@ fn init_zarr_array(
     blosc_typesize: i32,
     blosc_blocksize: i32,
     endian: i32,
+    transpose_order: Option<Vec<usize>>,
 ) -> Result<ZarrWriteContext, Box<dyn std::error::Error>> {
     // Map data type code to zarrs DataType
     let data_type = match data_type_code {
@@ -885,6 +1069,37 @@ fn init_zarr_array(
         vec!["y", "x", "c"]
     };
     
+    // Create transpose codec if requested
+    // Transpose must match the array dimensionality
+    let transpose_codec: Option<Arc<dyn zarrs::array::codec::ArrayToArrayCodecTraits>> = 
+        if let Some(ref order) = transpose_order {
+            let dimensions = array_shape.len();
+            
+            // Validate that the transpose order length matches array dimensions
+            if order.len() != dimensions {
+                return Err(format!(
+                    "Transpose order must have {} elements for {}D array, got {}",
+                    dimensions, dimensions, order.len()
+                ).into());
+            }
+            
+            // Check that it's a valid permutation (contains all indices 0..dimensions exactly once)
+            let mut sorted = order.clone();
+            sorted.sort_unstable();
+            let expected: Vec<usize> = (0..dimensions).collect();
+            if sorted != expected {
+                return Err(format!(
+                    "Transpose order must be a permutation of 0..{}, got {:?}",
+                    dimensions, order
+                ).into());
+            }
+            
+            let transpose_order = TransposeOrder::new(order)?;
+            Some(Arc::new(TransposeCodec::new(transpose_order)))
+        } else {
+            None
+        };
+    
     let array = if shard_shape.is_some() {
         use zarrs::array::codec::ShardingCodecBuilder;
         
@@ -896,51 +1111,43 @@ fn init_zarr_array(
             .bytes_to_bytes_codecs(vec![compression_codec])
             .build();
         
+        // Build with optional transpose, bytes, and sharding codecs
+        let mut builder = ArrayBuilder::new(
+            array_shape.clone(),
+            outer_chunk_shape_vec.as_slice(),
+            data_type.clone(),
+            fill_value,
+        );
+        builder.dimension_names(Some(dimension_names.clone()));
+        
+        if let Some(tc) = transpose_codec.clone() {
+            builder.array_to_array_codecs(vec![tc]);
+        }
         if let Some(bc) = bytes_codec.clone() {
-            ArrayBuilder::new(
-                array_shape.clone(),
-                outer_chunk_shape_vec.as_slice(),
-                data_type.clone(),
-                fill_value,
-            )
-            .dimension_names(Some(dimension_names.clone()))
-            .array_to_bytes_codec(bc)
-            .array_to_bytes_codec(Arc::new(sharding_codec))
-            .build(store.clone(), array_path)?
-        } else {
-            ArrayBuilder::new(
-                array_shape.clone(),
-                outer_chunk_shape_vec.as_slice(),
-                data_type.clone(),
-                fill_value,
-            )
-            .dimension_names(Some(dimension_names.clone()))
-            .array_to_bytes_codec(Arc::new(sharding_codec))
-            .build(store.clone(), array_path)?
+            builder.array_to_bytes_codec(bc);
         }
+        builder.array_to_bytes_codec(Arc::new(sharding_codec));
+        
+        builder.build(store.clone(), array_path)?
     } else {
-        if let Some(bc) = bytes_codec {
-            ArrayBuilder::new(
-                array_shape.clone(),
-                outer_chunk_shape_vec.as_slice(),
-                data_type.clone(),
-                fill_value,
-            )
-            .dimension_names(Some(dimension_names.clone()))
-            .array_to_bytes_codec(bc)
-            .bytes_to_bytes_codecs(vec![compression_codec])
-            .build(store.clone(), array_path)?
-        } else {
-            ArrayBuilder::new(
-                array_shape.clone(),
-                outer_chunk_shape_vec.as_slice(),
-                data_type.clone(),
-                fill_value,
-            )
-            .dimension_names(Some(dimension_names.clone()))
-            .bytes_to_bytes_codecs(vec![compression_codec])
-            .build(store.clone(), array_path)?
+        // Build with optional transpose, bytes, and compression codecs
+        let mut builder = ArrayBuilder::new(
+            array_shape.clone(),
+            outer_chunk_shape_vec.as_slice(),
+            data_type.clone(),
+            fill_value,
+        );
+        builder.dimension_names(Some(dimension_names.clone()));
+        
+        if let Some(tc) = transpose_codec {
+            builder.array_to_array_codecs(vec![tc]);
         }
+        if let Some(bc) = bytes_codec {
+            builder.array_to_bytes_codec(bc);
+        }
+        builder.bytes_to_bytes_codecs(vec![compression_codec]);
+        
+        builder.build(store.clone(), array_path)?
     };
     
     // Store array metadata
