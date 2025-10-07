@@ -10,26 +10,41 @@ use std::error::Error;
 
 /// Generate OME-Zarr compliant axes metadata
 /// 
-/// For a simple 2D or 3D image with channels, we generate:
+/// For 5D OME-Zarr data, we generate axes in order: [t, z, y, x, c]
+/// For 3D data without t/z, we generate: [y, x, c]
+/// - "t" for time axis (if time > 0)
+/// - "z" for depth axis (if depth > 0)
 /// - "y", "x" for spatial axes (always present)
-/// - "c" for channel axis (if bands > 1)
+/// - "c" for channel axis (always present per OME-NGFF spec)
 ///
 /// According to OME-Zarr spec:
 /// - Spatial axes should use type "space"
 /// - Channel axis should use type "channel"
-/// - Axes must be ordered: time (optional), channel (optional), space (z, y, x)
-fn generate_axes(_width: u64, _height: u64, bands: u64) -> Vec<Value> {
+/// - Time axis should use type "time"
+/// - Axes must be ordered: time, channel/space (in practice: t, z, y, x, c)
+/// - Channel axis should always be present for consistency
+fn generate_axes(_width: u64, _height: u64, _bands: u64, depth: u64, time: u64) -> Vec<Value> {
     let mut axes = Vec::new();
     
-    // Add channel axis if more than 1 band
-    if bands > 1 {
+    // Add time axis if specified (time > 0)
+    if time > 0 {
         axes.push(json!({
-            "name": "c",
-            "type": "channel"
+            "name": "t",
+            "type": "time",
+            "unit": "millisecond"
         }));
     }
     
-    // Add spatial axes (y, x order for images)
+    // Add depth (z) axis if specified (depth > 0)
+    if depth > 0 {
+        axes.push(json!({
+            "name": "z",
+            "type": "space",
+            "unit": "micrometer"
+        }));
+    }
+    
+    // Add spatial axes (y, x order for images) - always present
     axes.push(json!({
         "name": "y",
         "type": "space",
@@ -42,23 +57,38 @@ fn generate_axes(_width: u64, _height: u64, bands: u64) -> Vec<Value> {
         "unit": "micrometer"
     }));
     
+    // Add channel axis - always present per OME-NGFF spec
+    axes.push(json!({
+        "name": "c",
+        "type": "channel"
+    }));
+    
     axes
 }
 
 /// Generate coordinate transformations for a dataset
 ///
 /// Returns a scale transformation. For images without physical pixel size,
-/// we default to 1.0 (identity scale).
-fn generate_coordinate_transformations(bands: u64) -> Vec<Value> {
+/// we default to 1.0 (identity scale). Scale order matches axes order: [t, z, y, x, c]
+/// Channel scale is always included per OME-NGFF spec
+fn generate_coordinate_transformations(_bands: u64, depth: u64, time: u64) -> Vec<Value> {
     let mut scale = Vec::new();
     
-    // Scale for channel axis (if present) - always 1.0
-    if bands > 1 {
+    // Scale for time axis (if present) - always 1.0
+    if time > 0 {
         scale.push(1.0);
     }
     
-    // Scale for spatial axes (y, x) - default to 1.0 micrometer
+    // Scale for depth axis (if present) - default to 1.0 micrometer
+    if depth > 0 {
+        scale.push(1.0);
+    }
+    
+    // Scale for spatial axes (y, x) - default to 1.0 micrometer - always present
     scale.push(1.0);
+    scale.push(1.0);
+    
+    // Scale for channel axis - always 1.0, always present
     scale.push(1.0);
     
     vec![json!({
@@ -71,11 +101,18 @@ fn generate_coordinate_transformations(bands: u64) -> Vec<Value> {
 ///
 /// Each pyramid level is downsampled by 2^level from the base resolution.
 /// Level 0 has scale 1.0, level 1 has scale 2.0, level 2 has scale 4.0, etc.
-fn generate_pyramid_coordinate_transformations(bands: u64, level: u32) -> Vec<Value> {
+/// Only spatial dimensions (y, x) are scaled; time, depth, and channels remain at 1.0
+/// Channel scale is always included per OME-NGFF spec
+fn generate_pyramid_coordinate_transformations(_bands: u64, depth: u64, time: u64, level: u32) -> Vec<Value> {
     let mut scale = Vec::new();
     
-    // Scale for channel axis (if present) - always 1.0
-    if bands > 1 {
+    // Scale for time axis (if present) - always 1.0
+    if time > 0 {
+        scale.push(1.0);
+    }
+    
+    // Scale for depth axis (if present) - always 1.0 (no downsampling in z)
+    if depth > 0 {
         scale.push(1.0);
     }
     
@@ -83,6 +120,9 @@ fn generate_pyramid_coordinate_transformations(bands: u64, level: u32) -> Vec<Va
     let level_scale = 2.0_f64.powi(level as i32);
     scale.push(level_scale);
     scale.push(level_scale);
+    
+    // Scale for channel axis - always 1.0, always present
+    scale.push(1.0);
     
     vec![json!({
         "type": "scale",
@@ -98,18 +138,26 @@ pub fn generate_ome_zarr_metadata(
     width: u64,
     height: u64,
     bands: u64,
+    depth: u64,
+    time: u64,
     data_type_code: i32,
 ) -> Result<Value, Box<dyn Error>> {
-    let axes = generate_axes(width, height, bands);
-    let coord_transforms = generate_coordinate_transformations(bands);
+    let axes = generate_axes(width, height, bands, depth, time);
+    let coord_transforms = generate_coordinate_transformations(bands, depth, time);
     
-    // Build the dataset shape
+    // Build the dataset shape to match axes order: [t?, z?, y, x, c]
+    // Note: This is for documentation; actual shape is in the array metadata
     let mut shape = Vec::new();
-    if bands > 1 {
-        shape.push(bands);
+    if time > 0 {
+        shape.push(time);
+    }
+    if depth > 0 {
+        shape.push(depth);
     }
     shape.push(height);
     shape.push(width);
+    // Channel dimension is always included to match axes
+    shape.push(bands);
     
     // Get data type string for zarr (for future use)
     let _data_type_str = match data_type_code {
@@ -157,24 +205,27 @@ pub fn generate_ome_zarr_metadata(
 /// Parameters:
 /// - num_levels: Number of pyramid levels (1 = no pyramid, 2+ = pyramid)
 /// - width, height, bands: Dimensions of the full-resolution level (level 0)
+/// - depth, time: Z-slices and time points
 /// - data_type_code: Data type code for the array
 pub fn generate_ome_zarr_pyramid_metadata(
     num_levels: u32,
     width: u64,
     height: u64,
     bands: u64,
+    depth: u64,
+    time: u64,
     data_type_code: i32,
 ) -> Result<Value, Box<dyn Error>> {
     if num_levels == 0 {
         return Err("num_levels must be at least 1".into());
     }
     
-    let axes = generate_axes(width, height, bands);
+    let axes = generate_axes(width, height, bands, depth, time);
     
     // Build datasets array for all pyramid levels
     let mut datasets = Vec::new();
     for level in 0..num_levels {
-        let coord_transforms = generate_pyramid_coordinate_transformations(bands, level);
+        let coord_transforms = generate_pyramid_coordinate_transformations(bands, depth, time, level);
         datasets.push(json!({
             "path": level.to_string(),
             "coordinateTransformations": coord_transforms

@@ -36,6 +36,8 @@ typedef void *VipsZarrHandle;
  *   width - Width of the image
  *   height - Height of the image  
  *   bands - Number of bands/channels
+ *   depth - Number of z-slices (0 for 2D/3D without z)
+ *   time - Number of time points (0 for non-temporal data)
  *   data_type - Data type:
  *       0=uint8, 1=uint16, 2=uint32, 3=float32, 4=float64
  *       5=int8, 6=int16, 7=int32, 8=uint64, 9=int64
@@ -64,6 +66,8 @@ VipsZarrHandle vips_zarr_init_array(
     uint64_t width,
     uint64_t height,
     uint64_t bands,
+    uint64_t depth,
+    uint64_t time,
     int32_t data_type,
     int ome_zarr,
     int chunk_height,
@@ -134,6 +138,8 @@ int vips_zarr_finalize_no_metadata(VipsZarrHandle handle);
  *   width - Width of the full resolution level (level 0)
  *   height - Height of the full resolution level (level 0)
  *   bands - Number of bands/channels
+ *   depth - Number of z-slices
+ *   time - Number of time points
  *   data_type - Data type code (same as vips_zarr_init_array)
  * 
  * Returns:
@@ -145,6 +151,8 @@ int vips_zarr_write_pyramid_metadata(
     uint64_t width,
     uint64_t height,
     uint64_t bands,
+    uint64_t depth,
+    uint64_t time,
     int32_t data_type
 );
 

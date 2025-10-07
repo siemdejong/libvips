@@ -23,6 +23,8 @@ struct ZarrWriteContext {
     width: u64,
     height: u64,
     bands: u64,
+    depth: u64,
+    time: u64,
     data_type_code: i32,
     ome_zarr: bool,
     path: String,
@@ -431,7 +433,9 @@ fn write_zarr_array(
     
     // If OME-Zarr mode, write the group-level metadata
     if ome_zarr {
-        write_ome_zarr_metadata(path, width, height, bands, data_type_code)?;
+        // For the simple write function, we don't support multi-dimensional data
+        // Set depth and time to 1 (single slice, single timepoint)
+        write_ome_zarr_metadata(path, width, height, bands, 1, 1, data_type_code)?;
     }
     
     Ok(())
@@ -443,10 +447,12 @@ fn write_ome_zarr_metadata(
     width: u64,
     height: u64,
     bands: u64,
+    depth: u64,
+    time: u64,
     data_type_code: i32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Generate the OME-Zarr metadata
-    let ome_metadata = ome_zarr::generate_ome_zarr_metadata(width, height, bands, data_type_code)?;
+    let ome_metadata = ome_zarr::generate_ome_zarr_metadata(width, height, bands, depth, time, data_type_code)?;
     
     // Build the path to zarr.json at the root
     let zarr_json_path = Path::new(path).join("zarr.json");
@@ -489,11 +495,13 @@ fn write_ome_zarr_pyramid_metadata(
     width: u64,
     height: u64,
     bands: u64,
+    depth: u64,
+    time: u64,
     data_type_code: i32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Generate the OME-Zarr pyramid metadata
     let ome_metadata = ome_zarr::generate_ome_zarr_pyramid_metadata(
-        num_levels, width, height, bands, data_type_code
+        num_levels, width, height, bands, depth, time, data_type_code
     )?;
     
     // Build the path to zarr.json at the root
@@ -556,6 +564,8 @@ pub extern "C" fn vips_zarr_init_array(
     width: u64,
     height: u64,
     bands: u64,
+    depth: u64,
+    time: u64,
     data_type: i32,
     ome_zarr: i32,
     chunk_height: i32,
@@ -599,7 +609,7 @@ pub extern "C" fn vips_zarr_init_array(
     
     // Initialize the array
     match init_zarr_array(
-        &path_str, width, height, bands, data_type, use_ome_zarr,
+        &path_str, width, height, bands, depth, time, data_type, use_ome_zarr,
         chunk_shape, shard_shape, compression, gzip_level, zstd_level,
         blosc_clevel, blosc_shuffle, blosc_typesize, blosc_blocksize, endian
     ) {
@@ -681,6 +691,8 @@ pub extern "C" fn vips_zarr_write_pyramid_metadata(
     width: u64,
     height: u64,
     bands: u64,
+    depth: u64,
+    time: u64,
     data_type: i32,
 ) -> i32 {
     if path.is_null() {
@@ -692,7 +704,7 @@ pub extern "C" fn vips_zarr_write_pyramid_metadata(
         Err(_) => return -1,
     };
     
-    match write_ome_zarr_pyramid_metadata(path_str, num_levels, width, height, bands, data_type) {
+    match write_ome_zarr_pyramid_metadata(path_str, num_levels, width, height, bands, depth, time, data_type) {
         Ok(_) => 0,
         Err(_) => -1,
     }
@@ -704,6 +716,8 @@ fn init_zarr_array(
     width: u64,
     height: u64,
     bands: u64,
+    depth: u64,
+    time: u64,
     data_type_code: i32,
     ome_zarr: bool,
     chunk_shape: Option<(u64, u64, u64)>,
@@ -737,13 +751,35 @@ fn init_zarr_array(
     // Create filesystem store
     let store = Arc::new(FilesystemStore::new(Path::new(path))?);
     
-    // Array shape: [height, width, bands]
-    let array_shape = vec![height, width, bands];
+    // Array shape: depends on whether we have time/depth dimensions
+    // - If both time and depth are 0: 3D array [height, width, bands]
+    // - If one or both are set: 5D array [time, depth, height, width, bands]
+    let (array_shape, use_5d) = if time > 0 || depth > 0 {
+        let time_dim = if time > 0 { time } else { 1 };
+        let depth_dim = if depth > 0 { depth } else { 1 };
+        (vec![time_dim, depth_dim, height, width, bands], true)
+    } else {
+        (vec![height, width, bands], false)
+    };
     
-    // Determine chunk shape
-    let inner_chunk_dims = chunk_shape.unwrap_or((height, width, bands));
-    let outer_chunk_dims = shard_shape.unwrap_or(inner_chunk_dims);
-    let outer_chunk_shape = vec![outer_chunk_dims.0, outer_chunk_dims.1, outer_chunk_dims.2];
+    // Determine chunk shape based on dimensionality
+    let (inner_chunk_shape_vec, outer_chunk_shape_vec) = if use_5d {
+        // 5D: chunk per time/depth slice (1×1) to allow streaming writes
+        let inner_chunk_dims = chunk_shape.unwrap_or((height, width, bands));
+        let inner_5d = vec![1, 1, inner_chunk_dims.0, inner_chunk_dims.1, inner_chunk_dims.2];
+        
+        let outer_chunk_dims = shard_shape.unwrap_or(inner_chunk_dims);
+        let outer_5d = vec![1, 1, outer_chunk_dims.0, outer_chunk_dims.1, outer_chunk_dims.2];
+        (inner_5d, outer_5d)
+    } else {
+        // 3D: standard chunking
+        let inner_chunk_dims = chunk_shape.unwrap_or((height, width, bands));
+        let inner_3d = vec![inner_chunk_dims.0, inner_chunk_dims.1, inner_chunk_dims.2];
+        
+        let outer_chunk_dims = shard_shape.unwrap_or(inner_chunk_dims);
+        let outer_3d = vec![outer_chunk_dims.0, outer_chunk_dims.1, outer_chunk_dims.2];
+        (inner_3d, outer_3d)
+    };
     
     // Fill value
     let fill_value = match data_type_code {
@@ -843,10 +879,16 @@ fn init_zarr_array(
     };
     
     // Build array with optional sharding
+    let dimension_names: Vec<&str> = if use_5d {
+        vec!["t", "z", "y", "x", "c"]
+    } else {
+        vec!["y", "x", "c"]
+    };
+    
     let array = if shard_shape.is_some() {
         use zarrs::array::codec::ShardingCodecBuilder;
         
-        let inner_chunk_shape: ChunkShape = vec![inner_chunk_dims.0, inner_chunk_dims.1, inner_chunk_dims.2]
+        let inner_chunk_shape: ChunkShape = inner_chunk_shape_vec.clone()
             .try_into()
             .map_err(|e| format!("Invalid inner chunk shape: {:?}", e))?;
         
@@ -857,20 +899,22 @@ fn init_zarr_array(
         if let Some(bc) = bytes_codec.clone() {
             ArrayBuilder::new(
                 array_shape.clone(),
-                outer_chunk_shape.as_slice(),
+                outer_chunk_shape_vec.as_slice(),
                 data_type.clone(),
                 fill_value,
             )
+            .dimension_names(Some(dimension_names.clone()))
             .array_to_bytes_codec(bc)
             .array_to_bytes_codec(Arc::new(sharding_codec))
             .build(store.clone(), array_path)?
         } else {
             ArrayBuilder::new(
                 array_shape.clone(),
-                outer_chunk_shape.as_slice(),
+                outer_chunk_shape_vec.as_slice(),
                 data_type.clone(),
                 fill_value,
             )
+            .dimension_names(Some(dimension_names.clone()))
             .array_to_bytes_codec(Arc::new(sharding_codec))
             .build(store.clone(), array_path)?
         }
@@ -878,20 +922,22 @@ fn init_zarr_array(
         if let Some(bc) = bytes_codec {
             ArrayBuilder::new(
                 array_shape.clone(),
-                outer_chunk_shape.as_slice(),
+                outer_chunk_shape_vec.as_slice(),
                 data_type.clone(),
                 fill_value,
             )
+            .dimension_names(Some(dimension_names.clone()))
             .array_to_bytes_codec(bc)
             .bytes_to_bytes_codecs(vec![compression_codec])
             .build(store.clone(), array_path)?
         } else {
             ArrayBuilder::new(
                 array_shape.clone(),
-                outer_chunk_shape.as_slice(),
+                outer_chunk_shape_vec.as_slice(),
                 data_type.clone(),
                 fill_value,
             )
+            .dimension_names(Some(dimension_names.clone()))
             .bytes_to_bytes_codecs(vec![compression_codec])
             .build(store.clone(), array_path)?
         }
@@ -918,6 +964,8 @@ fn init_zarr_array(
         width,
         height,
         bands,
+        depth,
+        time,
         data_type_code,
         ome_zarr,
         path: path.to_string(),
@@ -933,12 +981,25 @@ fn write_region(
     height: u64,
     data: &[u8],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Create subset for this region: [y..y+height, x..x+width, 0..bands]
-    let subset = ArraySubset::new_with_ranges(&[
-        y..(y + height),
-        x..(x + width),
-        0..ctx.bands,
-    ]);
+    // Determine if we're using 5D or 3D based on depth/time
+    let subset = if ctx.depth > 0 || ctx.time > 0 {
+        // 5D case: [t, z, y, x, c]
+        // Write to t=0, z=0 (first time point, first z-slice)
+        ArraySubset::new_with_ranges(&[
+            0..1,                 // Write to first time point only
+            0..1,                 // Write to first z-slice only
+            y..(y + height),      // y range
+            x..(x + width),       // x range
+            0..ctx.bands,         // all bands
+        ])
+    } else {
+        // 3D case: [y, x, c]
+        ArraySubset::new_with_ranges(&[
+            y..(y + height),      // y range
+            x..(x + width),       // x range
+            0..ctx.bands,         // all bands
+        ])
+    };
     
     // Write the data
     ctx.array.store_array_subset(&subset, data)?;
@@ -955,7 +1016,8 @@ fn finalize_zarr_array(
     
     // Write OME-Zarr metadata if needed
     if ctx.ome_zarr {
-        write_ome_zarr_metadata(&ctx.path, ctx.width, ctx.height, ctx.bands, ctx.data_type_code)?;
+        write_ome_zarr_metadata(&ctx.path, ctx.width, ctx.height, ctx.bands, 
+                                ctx.depth, ctx.time, ctx.data_type_code)?;
     }
     
     Ok(())

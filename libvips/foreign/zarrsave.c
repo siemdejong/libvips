@@ -59,6 +59,8 @@ typedef struct _VipsForeignSaveZarr {
 	char *filename;
 	gboolean ome_zarr;
 	gboolean pyramid;
+	int depth;
+	int time;
 	int chunk_height;
 	int chunk_width;
 	int chunk_bands;
@@ -244,6 +246,8 @@ vips_foreign_save_zarr_build(VipsObject *object)
 			layer->Xsize,
 			layer->Ysize,
 			layer->Bands,
+			zarr->depth,
+			zarr->time,
 			data_type,
 			FALSE,  /* Don't write OME metadata per level */
 			zarr->chunk_height,
@@ -319,7 +323,8 @@ vips_foreign_save_zarr_build(VipsObject *object)
 		if (zarr->pyramid) {
 			/* Write pyramid metadata with all levels */
 			if (vips_zarr_write_pyramid_metadata(zarr->filename, 
-					num_levels, in->Xsize, in->Ysize, in->Bands, data_type) < 0) {
+					num_levels, in->Xsize, in->Ysize, in->Bands, 
+					zarr->depth, zarr->time, data_type) < 0) {
 				vips_error("zarrsave", "%s", "failed to write pyramid metadata");
 				return -1;
 			}
@@ -329,7 +334,8 @@ vips_foreign_save_zarr_build(VipsObject *object)
 			 * We'll use the pyramid function with num_levels=1.
 			 */
 			if (vips_zarr_write_pyramid_metadata(zarr->filename, 
-					1, in->Xsize, in->Ysize, in->Bands, data_type) < 0) {
+					1, in->Xsize, in->Ysize, in->Bands, 
+					zarr->depth, zarr->time, data_type) < 0) {
 				vips_error("zarrsave", "%s", "failed to write OME metadata");
 				return -1;
 			}
@@ -499,6 +505,20 @@ vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 		G_STRUCT_OFFSET(VipsForeignSaveZarr, endian),
 		VIPS_TYPE_FOREIGN_ZARR_ENDIAN,
 		VIPS_FOREIGN_ZARR_ENDIAN_LITTLE);
+
+	VIPS_ARG_INT(class, "depth", 35,
+		_("Depth"),
+		_("Number of z-slices (depth dimension, 0 for 2D/3D without z)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, depth),
+		0, INT_MAX, 0);
+
+	VIPS_ARG_INT(class, "time", 36,
+		_("Time"),
+		_("Number of time points (time dimension, 0 for non-temporal data)"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, time),
+		0, INT_MAX, 0);
 }
 
 static void
@@ -530,6 +550,8 @@ vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
  * * @blosc_typesize: %gint, blosc typesize (0 for automatic)
  * * @blosc_blocksize: %gint, blosc blocksize in bytes (0 for automatic)
  * * @endian: #VipsForeignZarrEndian, byte order for multi-byte data types
+ * * @depth: %gint, number of z-slices (depth dimension, 0 for 2D/3D without z)
+ * * @time: %gint, number of time points (time dimension, 0 for non-temporal data)
  *
  * Write @in to a Zarr v3 format array at @filename.
  *
