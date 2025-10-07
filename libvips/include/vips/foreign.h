@@ -1118,6 +1118,26 @@ typedef enum {
 } VipsForeignZarrBloscShuffle;
 
 /**
+ * VipsForeignZarrEndian:
+ * @VIPS_FOREIGN_ZARR_ENDIAN_LITTLE: little endian byte order
+ * @VIPS_FOREIGN_ZARR_ENDIAN_BIG: big endian byte order
+ * @VIPS_FOREIGN_ZARR_ENDIAN_NATIVE: native endian byte order of the system
+ *
+ * The endianness for the zarr bytes codec.
+ *
+ * Endianness determines the byte order for multi-byte data types. LITTLE is
+ * the default and most common. BIG is used by some older systems. NATIVE
+ * matches the endianness of the current system (little-endian on x86/ARM).
+ * Note that 8-bit types (uint8, int8) have no endianness.
+ */
+typedef enum {
+	VIPS_FOREIGN_ZARR_ENDIAN_LITTLE,
+	VIPS_FOREIGN_ZARR_ENDIAN_BIG,
+	VIPS_FOREIGN_ZARR_ENDIAN_NATIVE,
+	VIPS_FOREIGN_ZARR_ENDIAN_LAST	/*< skip >*/
+} VipsForeignZarrEndian;
+
+/**
  * VipsForeignZarrCompression:
  * @VIPS_FOREIGN_ZARR_COMPRESSION_GZIP: gzip compression
  * @VIPS_FOREIGN_ZARR_COMPRESSION_ZSTD: zstd compression

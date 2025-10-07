@@ -72,6 +72,7 @@ typedef struct _VipsForeignSaveZarr {
 	VipsForeignZarrBloscShuffle blosc_shuffle;
 	int blosc_typesize;
 	int blosc_blocksize;
+	VipsForeignZarrEndian endian;
 	
 	/* Streaming write context */
 	VipsZarrHandle zarr_handle;
@@ -257,7 +258,8 @@ vips_foreign_save_zarr_build(VipsObject *object)
 			zarr->blosc_clevel,
 			zarr->blosc_shuffle,
 			zarr->blosc_typesize,
-			zarr->blosc_blocksize
+			zarr->blosc_blocksize,
+			zarr->endian
 		);
 		
 		if (!zarr->zarr_handle) {
@@ -489,6 +491,14 @@ vips_foreign_save_zarr_class_init(VipsForeignSaveZarrClass *class)
 		VIPS_ARGUMENT_OPTIONAL_INPUT,
 		G_STRUCT_OFFSET(VipsForeignSaveZarr, blosc_blocksize),
 		0, INT_MAX, 0);
+
+	VIPS_ARG_ENUM(class, "endian", 34,
+		_("Endianness"),
+		_("Byte order for multi-byte data types"),
+		VIPS_ARGUMENT_OPTIONAL_INPUT,
+		G_STRUCT_OFFSET(VipsForeignSaveZarr, endian),
+		VIPS_TYPE_FOREIGN_ZARR_ENDIAN,
+		VIPS_FOREIGN_ZARR_ENDIAN_LITTLE);
 }
 
 static void
@@ -515,6 +525,11 @@ vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
  * * @compression: #VipsForeignZarrCompression, compression codec
  * * @gzip_level: %gint, gzip compression level (1-9, 0 for default of 5)
  * * @zstd_level: %gint, zstd compression level (1-22, 0 for default of 3)
+ * * @blosc_clevel: %gint, blosc compression level (0-9, 0 for default of 5)
+ * * @blosc_shuffle: #VipsForeignZarrBloscShuffle, blosc shuffle mode
+ * * @blosc_typesize: %gint, blosc typesize (0 for automatic)
+ * * @blosc_blocksize: %gint, blosc blocksize in bytes (0 for automatic)
+ * * @endian: #VipsForeignZarrEndian, byte order for multi-byte data types
  *
  * Write @in to a Zarr v3 format array at @filename.
  *
@@ -538,6 +553,13 @@ vips_foreign_save_zarr_init(VipsForeignSaveZarr *zarr)
  * - Lower values (1-3): Very fast compression
  * - Medium values (4-9): Good balance of speed and compression
  * - Higher values (10-22): Maximum compression, slower speed
+ *
+ * Use @endian to control byte order for multi-byte data types (default LITTLE):
+ * - LITTLE: Little-endian byte order (most common, x86/ARM systems)
+ * - BIG: Big-endian byte order (some older systems, network byte order)
+ * - NATIVE: Use the native byte order of the current system
+ * Note: Endianness only applies to multi-byte types (uint16, uint32, float32, 
+ * float64, etc.). 8-bit types (uint8, int8) have no endianness.
  *
  * Chunking divides the array into regular blocks for efficient access:
  * - If @chunk_height, @chunk_width, and @chunk_bands are specified (all > 0),

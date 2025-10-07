@@ -10,8 +10,9 @@ use std::sync::Arc;
 use std::fs;
 
 use zarrs::array::{Array, ArrayBuilder, DataType, FillValue, ChunkShape};
-use zarrs::array::codec::{GzipCodec, ZstdCodec, BloscCodec};
+use zarrs::array::codec::{GzipCodec, ZstdCodec, BloscCodec, BytesCodec};
 use zarrs::array_subset::ArraySubset;
+use zarrs::metadata::Endianness;
 use zarrs_filesystem::FilesystemStore;
 use serde_json::json;
 use num_complex::{Complex32, Complex64};
@@ -108,6 +109,7 @@ pub extern "C" fn vips_zarr_write_array(
     blosc_shuffle: i32,
     blosc_typesize: i32,
     blosc_blocksize: i32,
+    endian: i32,
 ) -> i32 {
     // Convert C string to Rust string
     let path_str = unsafe {
@@ -142,7 +144,7 @@ pub extern "C" fn vips_zarr_write_array(
     match write_zarr_array(
         path_str, width, height, bands, data_type, data_slice, use_ome_zarr, 
         chunk_shape, shard_shape, compression, gzip_level, zstd_level,
-        blosc_clevel, blosc_shuffle, blosc_typesize, blosc_blocksize
+        blosc_clevel, blosc_shuffle, blosc_typesize, blosc_blocksize, endian
     ) {
         Ok(_) => 0,
         Err(_) => -1,
@@ -167,6 +169,7 @@ fn write_zarr_array(
     blosc_shuffle: i32,
     blosc_typesize: i32,
     blosc_blocksize: i32,
+    endian: i32,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // Map data type code to zarrs DataType
     let data_type = match data_type_code {
@@ -312,6 +315,23 @@ fn write_zarr_array(
         },
     };
     
+    // Create endianness codec
+    // endian parameter: 0=little, 1=big, 2=native
+    // For 8-bit types, endianness doesn't matter (pass None)
+    let endianness = match endian {
+        0 => Some(Endianness::Little),
+        1 => Some(Endianness::Big),
+        2 => Some(Endianness::native()),
+        _ => Some(Endianness::Little), // Default to little endian
+    };
+    
+    // BytesCodec should not be used for 8-bit types (they have no endianness)
+    let bytes_codec = if element_size > 1 {
+        Some(Arc::new(BytesCodec::new(endianness)))
+    } else {
+        None  // 8-bit types don't need endian conversion
+    };
+    
     // Build array with optional sharding
     // In Zarr v3:
     // - The chunk_grid defines the outer chunks (shards if sharding is used)
@@ -332,24 +352,52 @@ fn write_zarr_array(
             .bytes_to_bytes_codecs(vec![compression_codec])
             .build();
         
-        ArrayBuilder::new(
-            array_shape.clone(),
-            outer_chunk_shape.as_slice(),  // Shard boundaries in the chunk grid
-            data_type.clone(),
-            fill_value,
-        )
-        .array_to_bytes_codec(Arc::new(sharding_codec))
-        .build(store.clone(), array_path)?
+        // Build the ArrayBuilder with codecs in the proper order:
+        // 1. BytesCodec (array-to-bytes) for endianness (optional)
+        // 2. ShardingCodec (array-to-bytes) for grouping chunks
+        if let Some(bc) = bytes_codec.clone() {
+            ArrayBuilder::new(
+                array_shape.clone(),
+                outer_chunk_shape.as_slice(),
+                data_type.clone(),
+                fill_value,
+            )
+            .array_to_bytes_codec(bc)
+            .array_to_bytes_codec(Arc::new(sharding_codec))
+            .build(store.clone(), array_path)?
+        } else {
+            ArrayBuilder::new(
+                array_shape.clone(),
+                outer_chunk_shape.as_slice(),
+                data_type.clone(),
+                fill_value,
+            )
+            .array_to_bytes_codec(Arc::new(sharding_codec))
+            .build(store.clone(), array_path)?
+        }
     } else {
         // Without sharding: chunks are stored as individual files with selected compression
-        ArrayBuilder::new(
-            array_shape.clone(),
-            outer_chunk_shape.as_slice(),  // Chunk boundaries
-            data_type.clone(),
-            fill_value,
-        )
-        .bytes_to_bytes_codecs(vec![compression_codec])
-        .build(store.clone(), array_path)?
+        // Codec chain: BytesCodec (array-to-bytes) → compression (bytes-to-bytes)
+        if let Some(bc) = bytes_codec {
+            ArrayBuilder::new(
+                array_shape.clone(),
+                outer_chunk_shape.as_slice(),
+                data_type.clone(),
+                fill_value,
+            )
+            .array_to_bytes_codec(bc)
+            .bytes_to_bytes_codecs(vec![compression_codec])
+            .build(store.clone(), array_path)?
+        } else {
+            ArrayBuilder::new(
+                array_shape.clone(),
+                outer_chunk_shape.as_slice(),
+                data_type.clone(),
+                fill_value,
+            )
+            .bytes_to_bytes_codecs(vec![compression_codec])
+            .build(store.clone(), array_path)?
+        }
     };
     
     // Store array metadata
@@ -523,6 +571,7 @@ pub extern "C" fn vips_zarr_init_array(
     blosc_shuffle: i32,
     blosc_typesize: i32,
     blosc_blocksize: i32,
+    endian: i32,
 ) -> *mut std::ffi::c_void {
     // Convert C string to Rust string
     let path_str = unsafe {
@@ -552,7 +601,7 @@ pub extern "C" fn vips_zarr_init_array(
     match init_zarr_array(
         &path_str, width, height, bands, data_type, use_ome_zarr,
         chunk_shape, shard_shape, compression, gzip_level, zstd_level,
-        blosc_clevel, blosc_shuffle, blosc_typesize, blosc_blocksize
+        blosc_clevel, blosc_shuffle, blosc_typesize, blosc_blocksize, endian
     ) {
         Ok(ctx) => {
             // Box the context and convert to opaque handle
@@ -666,6 +715,7 @@ fn init_zarr_array(
     blosc_shuffle: i32,
     blosc_typesize: i32,
     blosc_blocksize: i32,
+    endian: i32,
 ) -> Result<ZarrWriteContext, Box<dyn std::error::Error>> {
     // Map data type code to zarrs DataType
     let data_type = match data_type_code {
@@ -778,6 +828,20 @@ fn init_zarr_array(
         },
     };
     
+    // Create endianness codec
+    let endianness = match endian {
+        0 => Some(Endianness::Little),
+        1 => Some(Endianness::Big),
+        2 => Some(Endianness::native()),
+        _ => Some(Endianness::Little),
+    };
+    
+    let bytes_codec = if element_size > 1 {
+        Some(Arc::new(BytesCodec::new(endianness)))
+    } else {
+        None
+    };
+    
     // Build array with optional sharding
     let array = if shard_shape.is_some() {
         use zarrs::array::codec::ShardingCodecBuilder;
@@ -790,23 +854,47 @@ fn init_zarr_array(
             .bytes_to_bytes_codecs(vec![compression_codec])
             .build();
         
-        ArrayBuilder::new(
-            array_shape.clone(),
-            outer_chunk_shape.as_slice(),
-            data_type.clone(),
-            fill_value,
-        )
-        .array_to_bytes_codec(Arc::new(sharding_codec))
-        .build(store.clone(), array_path)?
+        if let Some(bc) = bytes_codec.clone() {
+            ArrayBuilder::new(
+                array_shape.clone(),
+                outer_chunk_shape.as_slice(),
+                data_type.clone(),
+                fill_value,
+            )
+            .array_to_bytes_codec(bc)
+            .array_to_bytes_codec(Arc::new(sharding_codec))
+            .build(store.clone(), array_path)?
+        } else {
+            ArrayBuilder::new(
+                array_shape.clone(),
+                outer_chunk_shape.as_slice(),
+                data_type.clone(),
+                fill_value,
+            )
+            .array_to_bytes_codec(Arc::new(sharding_codec))
+            .build(store.clone(), array_path)?
+        }
     } else {
-        ArrayBuilder::new(
-            array_shape.clone(),
-            outer_chunk_shape.as_slice(),
-            data_type.clone(),
-            fill_value,
-        )
-        .bytes_to_bytes_codecs(vec![compression_codec])
-        .build(store.clone(), array_path)?
+        if let Some(bc) = bytes_codec {
+            ArrayBuilder::new(
+                array_shape.clone(),
+                outer_chunk_shape.as_slice(),
+                data_type.clone(),
+                fill_value,
+            )
+            .array_to_bytes_codec(bc)
+            .bytes_to_bytes_codecs(vec![compression_codec])
+            .build(store.clone(), array_path)?
+        } else {
+            ArrayBuilder::new(
+                array_shape.clone(),
+                outer_chunk_shape.as_slice(),
+                data_type.clone(),
+                fill_value,
+            )
+            .bytes_to_bytes_codecs(vec![compression_codec])
+            .build(store.clone(), array_path)?
+        }
     };
     
     // Store array metadata

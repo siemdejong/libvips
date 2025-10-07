@@ -54,6 +54,7 @@ typedef void *VipsZarrHandle;
  *   blosc_shuffle - Blosc shuffle mode (0=noshuffle, 1=shuffle, 2=bitshuffle)
  *   blosc_typesize - Blosc typesize (0 for automatic based on data type)
  *   blosc_blocksize - Blosc blocksize in bytes (0 for automatic)
+ *   endian - Endianness (0=little, 1=big, 2=native)
  * 
  * Returns:
  *   Handle on success, NULL on error
@@ -77,7 +78,8 @@ VipsZarrHandle vips_zarr_init_array(
     int blosc_clevel,
     int blosc_shuffle,
     int blosc_typesize,
-    int blosc_blocksize
+    int blosc_blocksize,
+    int endian
 );
 
 /* Write a region of data to the zarr array

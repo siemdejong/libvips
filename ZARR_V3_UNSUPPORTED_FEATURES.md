@@ -69,10 +69,9 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 ### Array → Bytes Codecs
 
 #### Supported
-- ✅ `bytes` - Converts array to bytes with configurable endianness (currently fixed to `little`)
+- ✅ `bytes` - Converts array to bytes with configurable endianness (little, big, native)
 
 #### Not Supported
-- ❌ Configurable endianness (currently hardcoded to little-endian)
 - ❌ `sharding_indexed` as standalone array→bytes codec (only used internally when sharding is enabled)
 
 ### Bytes → Bytes Codecs
@@ -80,19 +79,22 @@ This document lists all features from the [Zarr v3.1 Core Specification](https:/
 #### Supported
 - ✅ `gzip` - Gzip compression with configurable level (1-9, default 5)
 - ✅ `zstd` - Zstd compression with configurable level (1-22, default 3)
+- ✅ `blosc` - Blosc compression with 6 compressor variants (LZ4, LZ4HC, BloscLZ, Zstd, Snappy, Zlib)
 
 #### Not Supported
-- ❌ `blosc` - Blosc compression
 - ❌ `crc32c` - CRC32C checksum
 - ❌ Extension codecs (custom compression/encoding)
 
 ### Codec Features
 
+#### Supported
+- ✅ Configurable endianness for bytes codec (little, big, native)
+- ✅ Multiple bytes→bytes codecs via sharding inner codecs
+- ✅ Codec configuration parameters (compression levels, blosc options, endianness)
+
 #### Not Supported
 - ❌ Multiple array→array codecs
-- ❌ Multiple bytes→bytes codecs (currently only gzip is used)
 - ❌ Custom codec chains beyond the current pattern
-- ❌ Codec configuration parameters (most codecs use hardcoded settings)
 - ❌ `must_understand=false` for optional codecs
 - ❌ Partial decoding for codecs (except via sharding)
 
